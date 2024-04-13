@@ -31,6 +31,21 @@ enum MobiHeaderIdent {
 }
 
 #[derive(Debug, PartialEq)]
+enum CompressionType {
+    NoCompression,
+    PalmDocCompression,
+    HuffCdicCompression,
+}
+
+fn parse_compression_type(input: &[u8]) -> IResult<&[u8], CompressionType> {
+    alt((
+        map(tag([0x00, 0x01]), |_| CompressionType::NoCompression),
+        map(tag([0x00, 0x02]), |_| CompressionType::PalmDocCompression),
+        map(tag([0x44, 0x48]), |_| CompressionType::HuffCdicCompression),
+    ))(input)
+}
+
+#[derive(Debug, PartialEq)]
 pub struct MobiHeader {
     name: String,
     num_sections: u16,
@@ -42,6 +57,7 @@ fn parse_name(input: &[u8]) -> IResult<&[u8], String> {
     let (input, name_bytes) = take(32usize)(input)?;
 
     let name = map(take_while(|b| b != 0x00), |bytes| {
+        // todo: should conditionally be utf8 or cp1252 based on codec in header
         str::from_utf8(bytes).unwrap_or_default().to_string()
     })(name_bytes)?;
 
@@ -114,7 +130,7 @@ const NULL_INDEX: u32 = u32::MAX;
 fn parse_book_header<'a>(input: &'a [u8], mobi_header: &MobiHeader) -> IResult<&'a [u8], ()> {
     let total_remaining_input_length = input.len();
 
-    let (input, compression_type) = be_u16(input)?;
+    let (input, compression_type) = parse_compression_type(input)?;
     let (input, _) = take(6usize)(input)?; // Skip 6 bytes
     let (input, records) = be_u16(input)?;
     let (input, records_size) = be_u16(input)?;
