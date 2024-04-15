@@ -4,11 +4,15 @@ use nom::{
     character::complete::{alphanumeric1, char},
     combinator::map,
     error::ErrorKind,
-    number::complete::{be_u16, be_u24, be_u32, be_u8, le_u32},
+    multi::count,
+    number::complete::{be_u16, be_u24, be_u32, be_u64, be_u8, le_u32},
     sequence::tuple,
     IResult,
 };
-use std::str::{self, FromStr};
+use std::{
+    iter::once,
+    str::{self, FromStr},
+};
 
 use crate::constants::{MainLanguage, SubLanguage};
 
@@ -138,6 +142,7 @@ struct BookHeader {
     encryption_type: u16,
     // todo: enum?
     doctype: String,
+    fdstidx: u32,
     // todo: enum/split up?
     extra_flags: u16,
 }
@@ -327,6 +332,7 @@ fn parse_book_header<'a>(
             records_size,
             doctype: String::from_utf8(doctype.to_vec()).unwrap(),
             encryption_type,
+            fdstidx,
             extra_flags,
         },
     ))
@@ -351,34 +357,79 @@ fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
         &mobi_header,
     )?;
 
-    let mut mobi_html = Vec::new();
+    fn get_section_data<'a>(
+        data: &'a [u8],
+        mobi_header: &MobiHeader,
+        section_i: usize,
+    ) -> &'a [u8] {
+        let end_offset = if section_i == (mobi_header.num_sections - 1).into() {
+            data.len()
+        } else {
+            mobi_header.section_headers[section_i + 1].offset as usize
+        };
+
+        let section_header = &mobi_header.section_headers[section_i];
+
+        &data[section_header.offset as usize..end_offset]
+    }
+
+    let mut raw_ml = Vec::new();
     for (i, section_header) in mobi_header.section_headers.iter().enumerate().skip(1) {
         if i > book_header.records as usize {
             break;
         }
 
-        let end_offset = if i == (mobi_header.num_sections - 1).into() {
-            original_input_length as u32
-        } else {
-            mobi_header.section_headers[i + 1].offset
-        };
-
-        let section_data = &original_input[section_header.offset as usize..end_offset as usize];
+        let section_data = get_section_data(original_input, &mobi_header, i);
         let section_data = &section_data
             [..section_data.len() - book_header.sizeof_trailing_section_entries(section_data)];
 
         let decompressed = palmdoc_compression::calibre::decompress(section_data);
 
-        mobi_html.extend_from_slice(&decompressed);
+        raw_ml.extend_from_slice(&decompressed);
     }
+
+    let fdst_section_data =
+        get_section_data(original_input, &mobi_header, book_header.fdstidx as usize);
+
+    let (_, fdst_table) = parse_fdst(fdst_section_data, raw_ml.len()).unwrap();
+
+    let mut flows = Vec::new();
+
+    for (starts_at, ends_at) in fdst_table.iter().zip(fdst_table.iter().skip(1)) {
+        let flow = &raw_ml[*starts_at..*ends_at];
+        flows.push(flow);
+    }
+
+    let text = flows.first().unwrap();
+
+    println!(
+        "flows: {:?}",
+        String::from_utf8_lossy(flows[flows.len() - 3])
+    );
 
     Ok((
         input,
         MobiBook {
             mobi_header,
-            content: String::from_utf8(mobi_html).unwrap(),
+            content: String::from_utf8(raw_ml).unwrap(),
         },
     ))
+}
+
+fn parse_fdst(input: &[u8], raw_ml_len: usize) -> IResult<&[u8], Vec<usize>> {
+    let (input, _) = tag(b"FDST")(input)?;
+    let (input, _) = take(4usize)(input)?;
+    let (input, num_sections) = be_u32(input)?;
+    let (input, sections) = count(be_u32, num_sections as usize * 2)(input)?;
+
+    let positions = sections
+        .iter()
+        .step_by(2)
+        .map(|x| *x as usize)
+        .chain(once(raw_ml_len))
+        .collect();
+
+    Ok((input, positions))
 }
 
 #[cfg(test)]
