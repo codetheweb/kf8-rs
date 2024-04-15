@@ -138,6 +138,48 @@ struct BookHeader {
     encryption_type: u16,
     // todo: enum?
     doctype: String,
+    // todo: enum/split up?
+    extra_flags: u16,
+}
+
+impl BookHeader {
+    fn sizeof_trailing_section_entries(&self, section_data: &[u8]) -> usize {
+        let mut num = 0;
+        let size = section_data.len();
+        let mut flags = self.extra_flags >> 1;
+
+        fn sizeof_trailing_section_entry(section_data: &[u8], offset: usize) -> usize {
+            let mut offset = offset;
+            let mut bitpos = 0;
+            let mut result: usize = 0;
+
+            loop {
+                let v = section_data[offset - 1] as usize;
+                result |= (v & 0x7f) << bitpos;
+                bitpos += 7;
+                offset -= 1;
+
+                if (v & 0x80) != 0 || (bitpos >= 28) || offset == 0 {
+                    return result;
+                }
+            }
+        }
+
+        while flags > 0 {
+            if flags & 1 > 0 {
+                num += sizeof_trailing_section_entry(section_data, size - num);
+            }
+
+            flags >>= 1;
+        }
+
+        if self.extra_flags & 1 > 0 {
+            let offset = size - num - 1;
+            num += (section_data[offset] as usize & 0x3) + 1;
+        }
+
+        num
+    }
 }
 
 fn parse_book_header<'a>(
@@ -222,7 +264,7 @@ fn parse_book_header<'a>(
 
     // at 132 bytes past input
 
-    let should_read_extra_flag = mobi_header.ident == MobiHeaderIdent::TextRead
+    let should_skip_extra_flag = mobi_header.ident == MobiHeaderIdent::TextRead
         || length < 0xe4
         || length > MAX_HEADER_LENGTH as u32;
     let mut extra_flags = 0;
@@ -234,20 +276,23 @@ fn parse_book_header<'a>(
             let (input, (mut fdstidx, fdstcnt)) = tuple((be_u32, be_u32))(input)?;
             let (input, _) = take(42usize)(input)?; // Skip 42 bytes
 
-            let input = if should_read_extra_flag {
+            println!(
+                "consumed bytes: {} {}",
+                total_remaining_input_length - input.len(),
+                should_skip_extra_flag
+            );
+
+            let input = if should_skip_extra_flag {
+                take(6usize)(input)?.0
+            } else {
                 let (input, flags) = be_u16(input)?;
                 extra_flags = flags;
 
+                println!("read flags: {}", flags);
+
                 // Skip 4 bytes
                 take(4usize)(input)?.0
-            } else {
-                take(6usize)(input)?.0
             };
-
-            println!(
-                "consumed bytes: {}",
-                total_remaining_input_length - input.len()
-            );
 
             let (input, (dividx, skelidx, datpidx, othidx)) =
                 tuple((be_u32, be_u32, be_u32, be_u32))(input)?;
@@ -282,6 +327,7 @@ fn parse_book_header<'a>(
             records_size,
             doctype: String::from_utf8(doctype.to_vec()).unwrap(),
             encryption_type,
+            extra_flags,
         },
     ))
 }
@@ -298,86 +344,39 @@ fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
     let (input, mobi_header) = parse_mobi_header(input)?;
 
     let (input, _) = take(2usize)(input)?; // Skip 2 bytes
-                                           // todo: use first section offset instead of manually skipping bytes above?
-                                           // parse_book_header(input, &mobi_header)?;
 
-    // let mut section_lengths = Vec::new();
-    // for i in 0..mobi_header.num_sections {
-    //     let next_offset = if i == mobi_header.num_sections - 1 {
-    //         original_input_length as u32
-    //     } else {
-    //         mobi_header.section_headers[i as usize + 1].offset
-    //     };
-
-    //     section_lengths.push(next_offset - mobi_header.section_headers[i as usize].offset);
-    // }
-
-    // let sections_data = &original_input[mobi_header.section_headers[1].offset as usize..];
-
-    // let mut input = sections_data;
-    // for (i, section_length) in section_lengths.iter().enumerate().skip(1) {
-    //     let (remaining_input, data) = take(*section_length as usize-  5)(input)?;
-    //     input = remaining_input;
-
-    //     // if i < 1 {
-    //     //     continue;
-    //     // }
-
-    //     println!("Section Data: {:?}", hex::encode(data));
-
-    //     let decompressed = palmdoc_compression::decompress(data).unwrap();
-
-    //     // println!("Section Data: {:?}", hex::encode(decompressed));
-    //     // parse_section(input)?;
-    //     // break;
-    // }
-
-    println!(
-        "num sections: {:?} {:?}",
-        mobi_header.num_sections,
-        mobi_header.section_headers.first().unwrap()
-    );
-
+    // todo: use first section offset instead of manually skipping bytes above?
     let (_, book_header) = parse_book_header(
         &original_input[mobi_header.section_headers.first().unwrap().offset as usize..],
         &mobi_header,
     )?;
 
-    println!("actual header {:?}", book_header);
-
-    // panic!();
-
     let mut mobi_html = Vec::new();
     for (i, section_header) in mobi_header.section_headers.iter().enumerate().skip(1) {
-        if i >= book_header.records as usize - 1 {
+        if i > book_header.records as usize {
             break;
         }
 
-        let end_offset = if i == (book_header.records - 1).into() {
+        let end_offset = if i == (mobi_header.num_sections - 1).into() {
             original_input_length as u32
         } else {
             mobi_header.section_headers[i + 1].offset
         };
+
         let section_data = &original_input[section_header.offset as usize..end_offset as usize];
+        let section_data = &section_data
+            [..section_data.len() - book_header.sizeof_trailing_section_entries(section_data)];
 
-        println!(
-            "data length: {}, next: {:?}",
-            section_data.len(),
-            mobi_header.section_headers[i + 1]
-        );
-
-        let decompressed = palmdoc_compression::decompress(section_data).unwrap();
+        let decompressed = palmdoc_compression::calibre::decompress(section_data);
 
         mobi_html.extend_from_slice(&decompressed);
     }
-
-    println!("Mobi HTML: {:?}", String::from_utf8_lossy(&mobi_html));
 
     Ok((
         input,
         MobiBook {
             mobi_header,
-            content: String::from_utf8_lossy(&mobi_html).to_string(),
+            content: String::from_utf8(mobi_html).unwrap(),
         },
     ))
 }
@@ -389,16 +388,20 @@ mod tests {
     use super::*;
 
     #[test]
-    fn it_works() {
-        // reader for resources/war_and_peace.azw3
+    fn extract_raw_html() {
         let mut reader = std::fs::File::open("resources/war_and_peace.azw3").unwrap();
         let mut data = Vec::new();
         reader.read_to_end(&mut data).unwrap();
 
         let (_, book) = parse_book(&data).unwrap();
 
-        let mut writer = std::fs::File::create("resources/unpacked.html").unwrap();
-        writer.write_all(book.content.as_bytes()).unwrap();
-        writer.flush().unwrap();
+        let mut expected_html_reader =
+            std::fs::File::open("resources/war_and_peace.rawml").unwrap();
+        let mut expected_html = String::new();
+        expected_html_reader
+            .read_to_string(&mut expected_html)
+            .unwrap();
+
+        assert_eq!(book.content, expected_html);
     }
 }
