@@ -10,16 +10,21 @@ use nom::{
     IResult,
 };
 use std::{
+    collections::HashMap,
     iter::once,
     str::{self, FromStr},
 };
 
-use crate::constants::{MainLanguage, SubLanguage};
+use crate::{
+    constants::{MainLanguage, SubLanguage},
+    tag_map::{parse_tag_map, parse_tag_section},
+};
 
 #[macro_use]
 extern crate lazy_static;
 
 mod constants;
+mod tag_map;
 
 #[derive(Debug, PartialEq)]
 pub struct SectionHeader {
@@ -143,6 +148,7 @@ struct BookHeader {
     // todo: enum?
     doctype: String,
     fdstidx: u32,
+    skelidx: u32,
     // todo: enum/split up?
     extra_flags: u16,
 }
@@ -333,6 +339,7 @@ fn parse_book_header<'a>(
             doctype: String::from_utf8(doctype.to_vec()).unwrap(),
             encryption_type,
             fdstidx,
+            skelidx,
             extra_flags,
         },
     ))
@@ -388,6 +395,7 @@ fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
         raw_ml.extend_from_slice(&decompressed);
     }
 
+    // Parse flow boundaries
     let fdst_section_data =
         get_section_data(original_input, &mobi_header, book_header.fdstidx as usize);
 
@@ -400,12 +408,64 @@ fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
         flows.push(flow);
     }
 
-    let text = flows.first().unwrap();
+    let text = *flows.first().unwrap();
 
-    println!(
-        "flows: {:?}",
-        String::from_utf8_lossy(flows[flows.len() - 3])
-    );
+    // Parse INDX header
+    let indx_section_data =
+        get_section_data(original_input, &mobi_header, book_header.skelidx as usize);
+    let (_, indx_header) = parse_indx_header(indx_section_data).unwrap();
+    println!("INDX Header: {:?}", indx_header);
+
+    let (_, tag_section) =
+        parse_tag_section(&indx_section_data[indx_header.len as usize..]).unwrap();
+
+    #[derive(Debug)]
+    struct SkeletonTableEntry {
+        file_number: usize,
+        label: String,
+        fragment_table_record_count: usize,
+        start_offset: usize,
+        len: usize,
+    }
+
+    let mut skeleton_table = vec![];
+
+    for i in (book_header.skelidx + 1)..(book_header.skelidx + 1 + indx_header.count) {
+        let data = get_section_data(original_input, &mobi_header, i as usize);
+        let (_, header) = parse_indx_header(data).unwrap();
+
+        let (_, indx_offsets) =
+            count(be_u16, header.count as usize)(&data[header.start as usize + 4..])?;
+
+        for (i, beginning_offset) in indx_offsets.iter().enumerate() {
+            let (remaining, segment) =
+                parse_indx_text_segment(&data[*beginning_offset as usize..])?;
+
+            let (_, tag_map) = parse_tag_map(
+                tag_section.control_byte_count,
+                &tag_section.table,
+                remaining,
+            )
+            .unwrap();
+            println!("tag map: {:?}", tag_map);
+
+            skeleton_table.push(SkeletonTableEntry {
+                file_number: i,
+                label: segment,
+                fragment_table_record_count: tag_map.get(&1).unwrap()[0] as usize,
+                start_offset: tag_map.get(&6).unwrap()[0] as usize,
+                len: tag_map.get(&6).unwrap()[1] as usize,
+            });
+        }
+    }
+
+    for entry in skeleton_table {
+        let text_fragment = &text[entry.start_offset..entry.start_offset + entry.len];
+        println!("fragment:\n{}", String::from_utf8_lossy(text_fragment));
+        println!("----------------------------------------------------------------------------------------")
+    }
+
+    // println!("skeleton table: {:?}", skeleton_table);
 
     Ok((
         input,
@@ -414,6 +474,14 @@ fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
             content: String::from_utf8(raw_ml).unwrap(),
         },
     ))
+}
+
+fn parse_indx_text_segment(input: &[u8]) -> IResult<&[u8], String> {
+    let (input, len) = be_u8(input)?;
+    let (input, segment) = take(len as usize)(input)?;
+
+    // todo: remove unwrap
+    return Ok((input, String::from_utf8(segment.to_vec()).unwrap()));
 }
 
 fn parse_fdst(input: &[u8], raw_ml_len: usize) -> IResult<&[u8], Vec<usize>> {
@@ -430,6 +498,72 @@ fn parse_fdst(input: &[u8], raw_ml_len: usize) -> IResult<&[u8], Vec<usize>> {
         .collect();
 
     Ok((input, positions))
+}
+
+#[derive(Debug)]
+struct INDXHeader {
+    len: u32,
+    nul1: u32,
+    type_field: u32,
+    gen: u32,
+    start: u32,
+    count: u32,
+    code: u32,
+    lng: u32,
+    total: u32,
+    ordt: u32,
+    ligt: u32,
+    nligt: u32,
+    nctoc: u32,
+    ordt1: Option<Vec<u8>>,
+    ordt2: Option<Vec<u16>>,
+}
+
+fn parse_indx_header(input: &[u8]) -> IResult<&[u8], INDXHeader> {
+    let (input, _) = tag(b"INDX")(input)?;
+
+    let (
+        input,
+        (len, nul1, type_field, gen, start, count, code, lng, total, ordt, ligt, nligt, nctoc),
+    ) = tuple((
+        be_u32, be_u32, be_u32, be_u32, be_u32, be_u32, be_u32, be_u32, be_u32, be_u32, be_u32,
+        be_u32, be_u32,
+    ))(input)?;
+
+    let (input, (ocnt, oentries, op1, op2, _otagx)) =
+        tuple((be_u32, be_u32, be_u32, be_u32, be_u32))(input)?;
+
+    let ordt1;
+    let ordt2;
+
+    if code == 0xfdea || ocnt != 0 || oentries > 0 {
+        ordt1 = Some(take(oentries as usize)(input)?.1.to_vec());
+        ordt2 = Some(nom::multi::count(be_u16, oentries as usize)(input)?.1);
+    } else {
+        ordt1 = None;
+        ordt2 = None;
+    }
+
+    Ok((
+        input,
+        INDXHeader {
+            len,
+            nul1,
+            type_field,
+            gen,
+            start,
+            count,
+            code,
+            lng,
+            total,
+            ordt,
+            ligt,
+            nligt,
+            nctoc,
+            ordt1,
+            ordt2,
+        },
+    ))
 }
 
 #[cfg(test)]
