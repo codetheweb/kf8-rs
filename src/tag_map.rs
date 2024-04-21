@@ -120,8 +120,8 @@ pub fn parse_tag_map<'a>(
             } else {
                 let mut mask = *mask;
                 while mask & 0x01 == 0 {
-                    mask = mask >> 1;
-                    value = value >> 1;
+                    mask >>= 1;
+                    value >>= 1;
                 }
 
                 tag_headers.push(SingleTagHeader {
@@ -164,5 +164,5 @@ pub fn parse_tag_map<'a>(
     }
 
     // todo: fix
-    Ok((&remaining, tag_hash_map))
+    Ok((remaining, tag_hash_map))
 }

@@ -1,11 +1,9 @@
 use nom::{
     branch::alt,
     bytes::complete::{tag, take, take_while},
-    character::complete::{alphanumeric1, char},
     combinator::map,
-    error::ErrorKind,
     multi::count,
-    number::complete::{be_u16, be_u24, be_u32, be_u64, be_u8, le_u32},
+    number::complete::{be_u16, be_u24, be_u32, be_u8},
     sequence::tuple,
     IResult,
 };
@@ -432,11 +430,9 @@ fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
             let fragment_insert_position =
                 (fragment_entry.insert_position as usize) - skeleton_entry.start_offset;
 
-            // let assembled = [head, fragment_text, tail].concat();
-
             assembled_text = [
                 &assembled_text[..fragment_insert_position],
-                &fragment_text,
+                fragment_text,
                 &assembled_text[fragment_insert_position..],
             ]
             .concat();
@@ -472,7 +468,7 @@ fn parse_index_data<'a>(
     section_i: usize,
 ) -> IResult<&'a [u8], Vec<IndexTableEntry>> {
     // Parse INDX header
-    let indx_section_data = get_section_data(original_input, &mobi_header, section_i);
+    let indx_section_data = get_section_data(original_input, mobi_header, section_i);
     let (_, indx_header) = parse_indx_header(indx_section_data).unwrap();
     println!("INDX Header: {:?}", indx_header);
 
@@ -482,7 +478,7 @@ fn parse_index_data<'a>(
     let mut skeleton_table = vec![];
 
     for i in (section_i + 1)..(section_i + 1 + indx_header.count as usize) {
-        let data = get_section_data(original_input, &mobi_header, i as usize);
+        let data = get_section_data(original_input, mobi_header, i);
         let (_, header) = parse_indx_header(data).unwrap();
 
         let (_, indx_offsets) =
@@ -519,7 +515,7 @@ struct SkeletonTableEntry {
     len: usize,
 }
 
-fn index_table_to_skeleton_table(table_entries: &Vec<IndexTableEntry>) -> Vec<SkeletonTableEntry> {
+fn index_table_to_skeleton_table(table_entries: &[IndexTableEntry]) -> Vec<SkeletonTableEntry> {
     table_entries
         .iter()
         .map(|entry| SkeletonTableEntry {
@@ -542,7 +538,7 @@ struct FragmentTableEntry {
     len: u32,
 }
 
-fn index_table_to_fragment_table(table_entries: &Vec<IndexTableEntry>) -> Vec<FragmentTableEntry> {
+fn index_table_to_fragment_table(table_entries: &[IndexTableEntry]) -> Vec<FragmentTableEntry> {
     println!("fragment table: {:?}", table_entries);
     table_entries
         .iter()
@@ -563,7 +559,7 @@ fn parse_indx_text_segment(input: &[u8]) -> IResult<&[u8], String> {
     let (input, segment) = take(len as usize)(input)?;
 
     // todo: remove unwrap
-    return Ok((input, String::from_utf8(segment.to_vec()).unwrap()));
+    Ok((input, String::from_utf8(segment.to_vec()).unwrap()))
 }
 
 fn parse_fdst(input: &[u8], raw_ml_len: usize) -> IResult<&[u8], Vec<usize>> {
