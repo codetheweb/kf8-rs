@@ -336,7 +336,7 @@ fn get_section_data<'a>(data: &'a [u8], mobi_header: &MobiHeader, section_i: usi
     &data[section_header.offset as usize..end_offset]
 }
 
-fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
+pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
     let original_input = input;
     let original_input_length = input.len();
     let (input, mobi_header) = parse_mobi_header(input)?;
