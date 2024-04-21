@@ -1,7 +1,7 @@
 use nom::{
     branch::alt,
     bytes::complete::{tag, take, take_while},
-    combinator::map,
+    combinator::{cond, map},
     multi::count,
     number::complete::{be_u16, be_u24, be_u32, be_u8},
     sequence::tuple,
@@ -14,14 +14,14 @@ use std::{
 };
 
 use crate::{
-    constants::{MainLanguage, SubLanguage},
+    constants::{MainLanguage, MetadataId, MetadataIdValue, SubLanguage},
     tag_map::{parse_tag_map, parse_tag_section},
 };
 
 #[macro_use]
 extern crate lazy_static;
 
-mod constants;
+pub mod constants;
 mod tag_map;
 
 #[derive(Debug, PartialEq)]
@@ -145,8 +145,8 @@ struct K8Header {
     fdst_count: u32,
 }
 
-#[derive(Debug, PartialEq)]
-struct BookHeader {
+#[derive(Debug)]
+pub struct BookHeader {
     compression_type: CompressionType,
     records: u16,
     records_size: u16,
@@ -158,6 +158,8 @@ struct BookHeader {
     // todo: enum/split up/rename
     extra_flags: Option<u16>,
     k8: Option<K8Header>,
+    pub title: String,
+    pub exth: Option<HashMap<MetadataId, Vec<String>>>,
 }
 
 impl BookHeader {
@@ -200,6 +202,57 @@ impl BookHeader {
     }
 }
 
+#[derive(Debug)]
+enum ExthKeyValue {
+    ID(MetadataId, String),
+    Value(MetadataIdValue, char),
+}
+
+fn parse_exth_key_value(input: &[u8]) -> IResult<&[u8], ExthKeyValue> {
+    let (input, id) = be_u32(input)?;
+
+    let (input, content_len) = be_u32(input)?;
+    let (input, content) = take(content_len as usize - 8)(input)?;
+
+    if let Ok(id) = MetadataId::try_from(id) {
+        let parsed = String::from_utf8(content.to_vec()).unwrap();
+
+        return Ok((input, ExthKeyValue::ID(id, parsed)));
+    } else if let Ok(id) = MetadataIdValue::try_from(id) {
+        let value: u32 = match content_len {
+            9 => be_u8(content)?.1 as u32,
+            10 => be_u16(content)?.1 as u32,
+            12 => be_u32(content)?.1 as u32,
+            _ => panic!(),
+        };
+
+        let parsed = char::from_u32(value).unwrap();
+
+        return Ok((input, ExthKeyValue::Value(id, parsed)));
+    }
+
+    panic!()
+}
+
+fn parse_exth(input: &[u8]) -> IResult<&[u8], HashMap<MetadataId, Vec<String>>> {
+    let (input, _) = take(4usize)(input)?;
+    let (input, len) = be_u32(input)?;
+
+    let (input, num_items) = be_u32(input)?;
+
+    let (input, items) = count(parse_exth_key_value, num_items as usize)(input)?;
+
+    let mut map: HashMap<MetadataId, Vec<String>> = HashMap::new();
+    for item in items {
+        match item {
+            ExthKeyValue::ID(id, content) => map.entry(id).or_default().push(content),
+            _ => continue,
+        }
+    }
+
+    Ok((input, map))
+}
+
 fn parse_book_header<'a>(
     data: &'a [u8],
     mobi_header: &MobiHeader,
@@ -234,7 +287,14 @@ fn parse_book_header<'a>(
         panic!("cp1252 not supported")
     }
 
-    let (input, _) = take(52usize)(input)?; // Skip 52 bytes
+    let (input, _) = take(44usize)(input)?; // Skip 44 bytes
+    let (input, title_offset) = be_u32(input)?;
+    let (input, title_length) = be_u32(input)?;
+
+    let title = String::from_utf8(
+        data[title_offset as usize..title_offset as usize + title_length as usize].to_vec(),
+    )
+    .unwrap();
 
     let (input, langcode) = be_u32(input)?;
 
@@ -254,6 +314,14 @@ fn parse_book_header<'a>(
     let (input, _) = take(16usize)(input)?; // Skip 12 bytes
 
     let (input, exth_flag) = be_u32(input)?;
+
+    let has_exth = (exth_flag & 0x40) > 0;
+    let exth = if has_exth {
+        let exth_offset = length as usize + 16;
+        Some(parse_exth(&data[exth_offset..])?.1)
+    } else {
+        None
+    };
     // todo: exth parsing (extended header, mostly DRM?)
 
     // at 132 bytes past input
@@ -269,6 +337,8 @@ fn parse_book_header<'a>(
         ncxidx,
         k8: None,
         extra_flags: None,
+        exth,
+        title,
     };
 
     if mobi_version >= 5 && length >= 0xe4 {
@@ -301,9 +371,10 @@ pub struct MobiBookPart {
     pub content: String,
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub struct MobiBook {
     mobi_header: MobiHeader,
+    pub book_header: BookHeader,
     content: String,
     pub parts: Vec<MobiBookPart>,
 }
@@ -379,7 +450,7 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
     let (_, fragment_table) = parse_index_data(
         original_input,
         &mobi_header,
-        book_header.k8.unwrap().fragidx as usize,
+        book_header.k8.clone().unwrap().fragidx as usize,
     )?;
 
     let fragment_table = index_table_to_fragment_table(&fragment_table);
@@ -431,6 +502,7 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
         input,
         MobiBook {
             mobi_header,
+            book_header,
             // todo: this should not be lossy
             content: String::from_utf8_lossy(&raw_ml).to_string(),
             parts,

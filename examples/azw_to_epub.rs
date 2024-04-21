@@ -1,4 +1,5 @@
 use epub_builder::{EpubBuilder, EpubContent, Result, ZipLibrary};
+use kf8::constants::MetadataId;
 use kf8::parse_book;
 use std::io::Read;
 
@@ -35,6 +36,26 @@ fn process(args: Args) -> Result<()> {
 
     for part in book.parts {
         builder.add_content(EpubContent::new(part.filename, part.content.as_bytes()))?;
+    }
+
+    builder.set_title(book.book_header.title);
+
+    if let Some(metadata) = book.book_header.exth {
+        if let Some(creators) = metadata.get(&MetadataId::Creator) {
+            for creator in creators {
+                builder.add_author(creator);
+            }
+        }
+
+        if let Some(subjects) = metadata.get(&MetadataId::Subject) {
+            builder.set_subjects(subjects.clone());
+        }
+
+        if let Some(descriptions) = metadata.get(&MetadataId::Description) {
+            for description in descriptions {
+                builder.add_description(description);
+            }
+        }
     }
 
     let writer = std::fs::File::create(args.output).unwrap();
