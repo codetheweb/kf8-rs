@@ -1,4 +1,4 @@
-use epub_builder::{EpubBuilder, Result, ZipLibrary};
+use epub_builder::{EpubBuilder, EpubContent, Result, ZipLibrary};
 use kf8::parse_book;
 use std::io::Read;
 
@@ -32,6 +32,10 @@ fn process(args: Args) -> Result<()> {
     let (_, book) = parse_book(&data).unwrap();
 
     let mut builder = EpubBuilder::new(ZipLibrary::new()?)?;
+
+    for part in book.parts {
+        builder.add_content(EpubContent::new(part.filename, part.content.as_bytes()))?;
+    }
 
     let writer = std::fs::File::create(args.output).unwrap();
     builder.generate(writer)?;

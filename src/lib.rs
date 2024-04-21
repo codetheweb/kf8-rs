@@ -212,20 +212,11 @@ fn parse_book_header<'a>(
     let (input, records_size) = be_u16(input)?;
     let (input, encryption_type) = be_u16(input)?;
 
-    println!("Compression Type: {:?}", compression_type);
-    println!("Records: {:?}", records);
-    println!("Records Size: {:?}", records_size);
-    println!("Encryption Type: {:?}", encryption_type);
-
     let (input, _) = take(2usize)(input)?; // Skip 2 bytes
     let (input, doctype) = take(4usize)(input)?;
 
     // 20 bytes past input
 
-    println!(
-        "Doc Type: {:?}",
-        str::from_utf8(doctype).unwrap_or_default()
-    );
     // todo: assert on doc type?
 
     // todo: handle cp1252?
@@ -238,12 +229,6 @@ fn parse_book_header<'a>(
 
     // 40 bytes past input
 
-    println!("Length: {:?}", length);
-    println!("Type: {:?}", type_field);
-    println!("Codepage: {:?}", codepage);
-    println!("Unique ID: {:?}", unique_id);
-    println!("Version: {:?}", version);
-
     if codepage == Codepage::Cp1252 {
         // todo: return error/handle cp1252
         panic!("cp1252 not supported")
@@ -252,7 +237,6 @@ fn parse_book_header<'a>(
     let (input, _) = take(52usize)(input)?; // Skip 52 bytes
 
     let (input, langcode) = be_u32(input)?;
-    println!("Langcode: {:?}", langcode);
 
     let langid = langcode & 0xff;
     let sublangid = (langcode >> 10) & 0xff;
@@ -261,18 +245,11 @@ fn parse_book_header<'a>(
     let language = MainLanguage::try_from(langid).unwrap();
     let sublanguage = SubLanguage::try_from(sublangid).unwrap();
 
-    println!("Language: {:?}", language);
-    println!("Sublanguage: {:?}", sublanguage);
-
     let (input, _) = take(8usize)(input)?; // Skip 8 bytes
 
     let (input, mobi_version) = be_u32(input)?;
 
-    println!("Mobi Version: {:?}", mobi_version);
-
     let (input, first_image_index) = be_u32(input)?;
-
-    println!("First Image Index: {:?}", first_image_index);
 
     let (input, _) = take(16usize)(input)?; // Skip 12 bytes
 
@@ -319,9 +296,16 @@ fn parse_book_header<'a>(
 }
 
 #[derive(Debug, PartialEq)]
+pub struct MobiBookPart {
+    pub filename: String,
+    pub content: String,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct MobiBook {
     mobi_header: MobiHeader,
     content: String,
+    pub parts: Vec<MobiBookPart>,
 }
 
 fn get_section_data<'a>(data: &'a [u8], mobi_header: &MobiHeader, section_i: usize) -> &'a [u8] {
@@ -392,11 +376,6 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
         book_header.k8.clone().unwrap().skelidx as usize,
     )?;
 
-    println!(
-        "fragment index: {}",
-        book_header.k8.clone().unwrap().fragidx
-    );
-
     let (_, fragment_table) = parse_index_data(
         original_input,
         &mobi_header,
@@ -405,28 +384,29 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
 
     let fragment_table = index_table_to_fragment_table(&fragment_table);
 
-    let mut fragment_i = 0;
-    for skeleton_entry in index_table_to_skeleton_table(&skeleton_table) {
-        let mut base_ptr = skeleton_entry.start_offset + skeleton_entry.len;
+    let mut parts = vec![];
 
-        println!(
-            "num records: {}",
-            skeleton_entry.fragment_table_record_count
-        );
+    let mut fragment_i = 0;
+    for (i, skeleton_entry) in index_table_to_skeleton_table(&skeleton_table)
+        .iter()
+        .enumerate()
+    {
+        let mut base_ptr = skeleton_entry.start_offset + skeleton_entry.len;
 
         let mut assembled_text = text
             [skeleton_entry.start_offset..skeleton_entry.start_offset + skeleton_entry.len]
             .to_vec();
 
         // todo: zip?
-        for _ in 0..skeleton_entry.fragment_table_record_count {
+        let mut filename: String = "".to_string();
+        for i in 0..skeleton_entry.fragment_table_record_count {
             let fragment_entry = fragment_table.get(fragment_i).unwrap();
 
+            if i == 0 {
+                filename = format!("part{}.xhtml", fragment_entry.file_number);
+            }
+
             let fragment_text = &text[base_ptr..base_ptr + fragment_entry.len as usize];
-            println!(
-                "insert position: {}, parent skeleton offset: {}, fragment len: {}, assembled text len: {}",
-                fragment_entry.insert_position, skeleton_entry.start_offset, fragment_entry.len, assembled_text.len()
-            );
             let fragment_insert_position =
                 (fragment_entry.insert_position as usize) - skeleton_entry.start_offset;
 
@@ -441,8 +421,10 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
             fragment_i += 1;
         }
 
-        println!("assembled: {}", String::from_utf8(assembled_text).unwrap());
-        println!("----------------------------------------------------------------------------------------")
+        parts.push(MobiBookPart {
+            content: String::from_utf8(assembled_text).unwrap(),
+            filename,
+        });
     }
 
     Ok((
@@ -451,6 +433,7 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
             mobi_header,
             // todo: this should not be lossy
             content: String::from_utf8_lossy(&raw_ml).to_string(),
+            parts,
         },
     ))
 }
@@ -470,7 +453,6 @@ fn parse_index_data<'a>(
     // Parse INDX header
     let indx_section_data = get_section_data(original_input, mobi_header, section_i);
     let (_, indx_header) = parse_indx_header(indx_section_data).unwrap();
-    println!("INDX Header: {:?}", indx_header);
 
     let (_, tag_section) =
         parse_tag_section(&indx_section_data[indx_header.len as usize..]).unwrap();
@@ -539,7 +521,6 @@ struct FragmentTableEntry {
 }
 
 fn index_table_to_fragment_table(table_entries: &[IndexTableEntry]) -> Vec<FragmentTableEntry> {
-    println!("fragment table: {:?}", table_entries);
     table_entries
         .iter()
         .map(|entry| FragmentTableEntry {
