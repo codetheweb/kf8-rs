@@ -2,9 +2,8 @@ use std::fmt;
 
 use num_enum::TryFromPrimitive;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub enum MainLanguage {
-    Neutral = 0,
     Afrikaans = 54,
     Albanian = 28,
     Arabic = 1,
@@ -87,7 +86,6 @@ impl TryFrom<u32> for MainLanguage {
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(MainLanguage::Neutral),
             54 => Ok(MainLanguage::Afrikaans),
             28 => Ok(MainLanguage::Albanian),
             1 => Ok(MainLanguage::Arabic),
@@ -168,9 +166,90 @@ impl TryFrom<u32> for MainLanguage {
     }
 }
 
-#[derive(Debug, PartialEq)]
+impl MainLanguage {
+    pub fn to_bcp47(&self) -> &'static str {
+        match self {
+            MainLanguage::Afrikaans => "af",
+            MainLanguage::Albanian => "sq",
+            MainLanguage::Arabic => "ar",
+            MainLanguage::Armenian => "hy",
+            MainLanguage::Assamese => "as",
+            MainLanguage::Azeri => "az",
+            MainLanguage::Basque => "eu",
+            MainLanguage::Belarusian => "be",
+            MainLanguage::Bengali => "bn",
+            MainLanguage::Bulgarian => "bg",
+            MainLanguage::Catalan => "ca",
+            MainLanguage::Chinese => "zh",
+            MainLanguage::Czech => "cs",
+            MainLanguage::Danish => "da",
+            MainLanguage::Dutch => "nl",
+            MainLanguage::English => "en",
+            MainLanguage::Estonian => "et",
+            MainLanguage::Faeroese => "fo",
+            MainLanguage::Farsi => "fa",
+            MainLanguage::Finnish => "fi",
+            MainLanguage::French => "fr",
+            MainLanguage::Georgian => "ka",
+            MainLanguage::German => "de",
+            MainLanguage::Greek => "el",
+            MainLanguage::Gujarati => "gu",
+            MainLanguage::Hebrew => "he",
+            MainLanguage::Hindi => "hi",
+            MainLanguage::Hungarian => "hu",
+            MainLanguage::Icelandic => "is",
+            MainLanguage::Indonesian => "id",
+            MainLanguage::Italian => "it",
+            MainLanguage::Japanese => "ja",
+            MainLanguage::Kannada => "kn",
+            MainLanguage::Kazak => "kk",
+            MainLanguage::Konkani => "kok",
+            MainLanguage::Korean => "ko",
+            MainLanguage::Latvian => "lv",
+            MainLanguage::Lithuanian => "lt",
+            MainLanguage::Macedonian => "mk",
+            MainLanguage::Malay => "ms",
+            MainLanguage::Malayalam => "ml",
+            MainLanguage::Maltese => "mt",
+            MainLanguage::Marathi => "mr",
+            MainLanguage::Nepali => "ne",
+            MainLanguage::Norwegian => "no",
+            MainLanguage::Oriya => "or",
+            MainLanguage::Polish => "pl",
+            MainLanguage::Portuguese => "pt",
+            MainLanguage::Punjabi => "pa",
+            MainLanguage::Rhaetoromanic => "rm",
+            MainLanguage::Romanian => "ro",
+            MainLanguage::Russian => "ru",
+            MainLanguage::Sami => "se",
+            MainLanguage::Sanskrit => "sa",
+            MainLanguage::Serbian => "sr",
+            MainLanguage::Slovak => "sk",
+            MainLanguage::Slovenian => "sl",
+            MainLanguage::Sorbian => "dsb",
+            MainLanguage::Spanish => "es",
+            MainLanguage::Sutu => "st",
+            MainLanguage::Swahili => "sw",
+            MainLanguage::Swedish => "sv",
+            MainLanguage::Tamil => "ta",
+            MainLanguage::Tatar => "tt",
+            MainLanguage::Telugu => "te",
+            MainLanguage::Thai => "th",
+            MainLanguage::Tsonga => "ts",
+            MainLanguage::Tswana => "tn",
+            MainLanguage::Turkish => "tr",
+            MainLanguage::Ukrainian => "uk",
+            MainLanguage::Urdu => "ur",
+            MainLanguage::Uzbek => "uz",
+            MainLanguage::Vietnamese => "vi",
+            MainLanguage::Xhosa => "xh",
+            MainLanguage::Zulu => "zu",
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
 pub enum SubLanguage {
-    Neutral,
     UzbekLatin,
     UzbekCyrillic,
     SerbianCyrillic,
@@ -198,7 +277,6 @@ impl TryFrom<u32> for SubLanguage {
 
     fn try_from(value: u32) -> Result<Self, Self::Error> {
         match value {
-            0 => Ok(SubLanguage::Neutral),
             1 => Ok(SubLanguage::UzbekLatin),
             2 => Ok(SubLanguage::UzbekCyrillic),
             3 => Ok(SubLanguage::SerbianCyrillic),
@@ -220,6 +298,33 @@ impl TryFrom<u32> for SubLanguage {
             19 => Ok(SubLanguage::SpanishNicaragua),
             20 => Ok(SubLanguage::SpanishPuertoRico),
             _ => Err(()),
+        }
+    }
+}
+
+impl SubLanguage {
+    pub fn to_bcp47(&self) -> &'static str {
+        match self {
+            SubLanguage::UzbekLatin => "uz-Latn",
+            SubLanguage::UzbekCyrillic => "uz-Cyrl",
+            SubLanguage::SerbianCyrillic => "sr-Cyrl",
+            SubLanguage::SpanishGuatemala => "es-GT",
+            SubLanguage::SpanishCostaRica => "es-CR",
+            SubLanguage::SpanishPanama => "es-PA",
+            SubLanguage::SpanishDominicanRepublic => "es-DO",
+            SubLanguage::SpanishVenezuela => "es-VE",
+            SubLanguage::SpanishColombia => "es-CO",
+            SubLanguage::SpanishPeru => "es-PE",
+            SubLanguage::SpanishArgentina => "es-AR",
+            SubLanguage::SpanishEcuador => "es-EC",
+            SubLanguage::SpanishChile => "es-CL",
+            SubLanguage::SpanishUruguay => "es-UY",
+            SubLanguage::SpanishParaguay => "es-PY",
+            SubLanguage::SpanishBolivia => "es-BO",
+            SubLanguage::SpanishElSalvador => "es-SV",
+            SubLanguage::SpanishHonduras => "es-HN",
+            SubLanguage::SpanishNicaragua => "es-NI",
+            SubLanguage::SpanishPuertoRico => "es-PR",
         }
     }
 }

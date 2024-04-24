@@ -3,6 +3,7 @@ use epub_builder::{EpubBuilder, EpubContent, Result, ZipLibrary};
 use kf8::constants::MetadataId;
 use kf8::{parse_book, ResourceKind};
 use std::io::{Cursor, Read};
+use uuid::Uuid;
 
 use clap::Parser;
 
@@ -40,10 +41,10 @@ fn process(args: Args) -> Result<()> {
         builder.add_content(EpubContent::new(part.filename, part.content.as_bytes()))?;
     }
 
-    builder.set_title(book.book_header.title);
+    builder.set_title(&book.book_header.title);
 
     // Metadata
-    if let Some(metadata) = book.book_header.standard_metadata {
+    if let Some(ref metadata) = book.book_header.standard_metadata {
         if let Some(creators) = metadata.get(&MetadataId::Creator) {
             for creator in creators {
                 builder.add_author(creator);
@@ -67,7 +68,25 @@ fn process(args: Args) -> Result<()> {
                     .into(),
             );
         }
+
+        if let Some(contributors) = metadata.get(&MetadataId::Contributor) {
+            // todo: currently unsupported by epub library
+        }
+
+        if let Some(source) = metadata.get(&MetadataId::Source) {
+            // todo: currently unsupported by epub library
+        }
+
+        if let Some(publishers) = metadata.get(&MetadataId::Publisher) {
+            // todo: currently unsupported by epub library
+        }
     }
+
+    if let Some(language_tag) = book.book_header.get_bcp47_language_tag() {
+        builder.set_lang(language_tag);
+    }
+
+    // todo: set the ID using the book_header.unique_id (unsupported by epub library?)
 
     // Resources
     for resource in book.resources {

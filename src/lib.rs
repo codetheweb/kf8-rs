@@ -154,6 +154,9 @@ pub struct BookHeader {
     encryption_type: u16,
     // todo: enum?
     doctype: String,
+    pub unique_id: u32,
+    pub language: Option<MainLanguage>,
+    pub sub_language: Option<SubLanguage>,
     ncxidx: u32,
     // todo: enum/split up/rename
     extra_flags: Option<u16>,
@@ -201,6 +204,15 @@ impl BookHeader {
         }
 
         num
+    }
+
+    pub fn get_bcp47_language_tag(&self) -> Option<&'static str> {
+        return self
+            .sub_language
+            .as_ref()
+            .map_or(self.language.as_ref().map(|l| l.to_bcp47()), |l| {
+                Some(l.to_bcp47())
+            });
     }
 }
 
@@ -311,8 +323,8 @@ fn parse_book_header<'a>(
     let sublangid = (langcode >> 10) & 0xff;
 
     // todo: don't unwrap
-    let language = MainLanguage::try_from(langid).unwrap();
-    let sublanguage = SubLanguage::try_from(sublangid).unwrap();
+    let language = MainLanguage::try_from(langid).ok();
+    let sub_language = SubLanguage::try_from(sublangid).ok();
 
     let (input, _) = take(8usize)(input)?; // Skip 8 bytes
 
@@ -343,6 +355,9 @@ fn parse_book_header<'a>(
         records_size,
         doctype: String::from_utf8(doctype.to_vec()).unwrap(),
         encryption_type,
+        unique_id,
+        language,
+        sub_language,
         ncxidx,
         k8: None,
         extra_flags: None,
