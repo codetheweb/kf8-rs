@@ -1,3 +1,4 @@
+use chrono::DateTime;
 use epub_builder::{EpubBuilder, EpubContent, Result, ZipLibrary};
 use kf8::constants::MetadataId;
 use kf8::{parse_book, ResourceKind};
@@ -57,6 +58,14 @@ fn process(args: Args) -> Result<()> {
             for description in descriptions {
                 builder.add_description(description);
             }
+        }
+
+        if let Some(published) = metadata.get(&MetadataId::Published) {
+            builder.set_publication_date(
+                DateTime::parse_from_rfc3339(published.first().unwrap())
+                    .unwrap()
+                    .into(),
+            );
         }
     }
 
