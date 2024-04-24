@@ -71,7 +71,8 @@ fn process(args: Args) -> Result<()> {
                 )?;
             }
             ResourceKind::Thumbnail => {
-                // todo
+                // Don't output thumbnails
+                continue;
             }
             ResourceKind::Image => {
                 builder.add_resource(

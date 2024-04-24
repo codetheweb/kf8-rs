@@ -538,6 +538,16 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
             .first()
             .unwrap() as usize;
 
+    let thumbnail_offset = book_header.first_resource_section_index
+        + *book_header
+            .kf8_metadata
+            .as_ref()
+            .unwrap()
+            .get(&MetadataIdValue::ThumbOffset)
+            .unwrap()
+            .first()
+            .unwrap() as usize;
+
     for section_i in book_header.first_resource_section_index..mobi_header.num_sections as usize {
         let data = get_section_data(original_input, &mobi_header, section_i);
         let (input, resource_type) = take(4usize)(data)?;
@@ -588,6 +598,12 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
                 if section_i == cover_offset {
                     resources.push(Resource {
                         kind: ResourceKind::Cover,
+                        data: data.to_vec(),
+                        file_type: file_type.unwrap(),
+                    })
+                } else if section_i == thumbnail_offset {
+                    resources.push(Resource {
+                        kind: ResourceKind::Thumbnail,
                         data: data.to_vec(),
                         file_type: file_type.unwrap(),
                     })
