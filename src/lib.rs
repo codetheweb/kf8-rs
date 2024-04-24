@@ -159,7 +159,9 @@ pub struct BookHeader {
     extra_flags: Option<u16>,
     k8: Option<K8Header>,
     pub title: String,
-    pub exth: Option<HashMap<MetadataId, Vec<String>>>,
+    pub standard_metadata: Option<HashMap<MetadataId, Vec<String>>>,
+    pub kf8_metadata: Option<HashMap<MetadataIdValue, Vec<u32>>>,
+    first_resource_section_index: usize,
 }
 
 impl BookHeader {
@@ -205,7 +207,7 @@ impl BookHeader {
 #[derive(Debug)]
 enum ExthKeyValue {
     ID(MetadataId, String),
-    Value(MetadataIdValue, char),
+    Value(MetadataIdValue, u32),
 }
 
 fn parse_exth_key_value(input: &[u8]) -> IResult<&[u8], ExthKeyValue> {
@@ -226,15 +228,21 @@ fn parse_exth_key_value(input: &[u8]) -> IResult<&[u8], ExthKeyValue> {
             _ => panic!(),
         };
 
-        let parsed = char::from_u32(value).unwrap();
-
-        return Ok((input, ExthKeyValue::Value(id, parsed)));
+        return Ok((input, ExthKeyValue::Value(id, value)));
     }
 
     panic!()
 }
 
-fn parse_exth(input: &[u8]) -> IResult<&[u8], HashMap<MetadataId, Vec<String>>> {
+fn parse_exth(
+    input: &[u8],
+) -> IResult<
+    &[u8],
+    (
+        HashMap<MetadataId, Vec<String>>,
+        HashMap<MetadataIdValue, Vec<u32>>,
+    ),
+> {
     let (input, _) = take(4usize)(input)?;
     let (input, len) = be_u32(input)?;
 
@@ -242,15 +250,16 @@ fn parse_exth(input: &[u8]) -> IResult<&[u8], HashMap<MetadataId, Vec<String>>> 
 
     let (input, items) = count(parse_exth_key_value, num_items as usize)(input)?;
 
-    let mut map: HashMap<MetadataId, Vec<String>> = HashMap::new();
+    let mut standard_metadata: HashMap<MetadataId, Vec<String>> = HashMap::new();
+    let mut kf8_metadata: HashMap<MetadataIdValue, Vec<u32>> = HashMap::new();
     for item in items {
         match item {
-            ExthKeyValue::ID(id, content) => map.entry(id).or_default().push(content),
-            _ => continue,
+            ExthKeyValue::ID(id, content) => standard_metadata.entry(id).or_default().push(content),
+            ExthKeyValue::Value(id, data) => kf8_metadata.entry(id).or_default().push(data),
         }
     }
 
-    Ok((input, map))
+    Ok((input, (standard_metadata, kf8_metadata)))
 }
 
 fn parse_book_header<'a>(
@@ -309,7 +318,7 @@ fn parse_book_header<'a>(
 
     let (input, mobi_version) = be_u32(input)?;
 
-    let (input, first_image_index) = be_u32(input)?;
+    let (input, first_resource_section_index) = be_u32(input)?;
 
     let (input, _) = take(16usize)(input)?; // Skip 12 bytes
 
@@ -337,8 +346,10 @@ fn parse_book_header<'a>(
         ncxidx,
         k8: None,
         extra_flags: None,
-        exth,
+        standard_metadata: Some(exth.clone().unwrap().0),
+        kf8_metadata: Some(exth.unwrap().1),
         title,
+        first_resource_section_index: first_resource_section_index as usize,
     };
 
     if mobi_version >= 5 && length >= 0xe4 {
@@ -372,11 +383,27 @@ pub struct MobiBookPart {
 }
 
 #[derive(Debug)]
+pub enum ResourceKind {
+    Cover,
+    Thumbnail,
+    Image,
+    Font,
+}
+
+#[derive(Debug)]
+pub struct Resource {
+    pub kind: ResourceKind,
+    pub data: Vec<u8>,
+    pub file_type: infer::Type,
+}
+
+#[derive(Debug)]
 pub struct MobiBook {
     mobi_header: MobiHeader,
     pub book_header: BookHeader,
     content: String,
     pub parts: Vec<MobiBookPart>,
+    pub resources: Vec<Resource>,
 }
 
 fn get_section_data<'a>(data: &'a [u8], mobi_header: &MobiHeader, section_i: usize) -> &'a [u8] {
@@ -498,6 +525,77 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
         });
     }
 
+    // Resources
+    let mut resources: Vec<Resource> = vec![];
+
+    let cover_offset = book_header.first_resource_section_index
+        + *book_header
+            .kf8_metadata
+            .as_ref()
+            .unwrap()
+            .get(&MetadataIdValue::CoverOffset)
+            .unwrap()
+            .first()
+            .unwrap() as usize;
+
+    for section_i in book_header.first_resource_section_index..mobi_header.num_sections as usize {
+        let data = get_section_data(original_input, &mobi_header, section_i);
+        let (input, resource_type) = take(4usize)(data)?;
+
+        match resource_type {
+            b"FLIS" | b"FCIS" | b"FDST" | b"DATP" => {
+                // todo?
+            }
+            b"SRCS" => {
+                // todo
+            }
+            b"PAGE" => {
+                // todo
+            }
+            b"CMET" => {
+                // todo
+            }
+            b"FONT" => {
+                // todo
+            }
+            b"CRES" => {
+                // todo
+            }
+            b"CONT" => {
+                // todo
+            }
+            b"kind" => {
+                // todo
+            }
+            [0xa0, 0xa0, 0xa0, 0xa0] => {
+                // todo
+                println!("byte pattern, empty image?")
+            }
+            b"RESC" => {
+                // todo
+            }
+            // EOF
+            [0xe9, 0x8e, 0x0d, 0x0a] => {
+                // todo
+            }
+            b"BOUN" => {
+                // todo
+            }
+            _ => {
+                // Should be an image
+                let file_type = infer::get(data);
+
+                if section_i == cover_offset {
+                    resources.push(Resource {
+                        kind: ResourceKind::Cover,
+                        data: data.to_vec(),
+                        file_type: file_type.unwrap(),
+                    })
+                }
+            }
+        }
+    }
+
     Ok((
         input,
         MobiBook {
@@ -506,6 +604,7 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
             // todo: this should not be lossy
             content: String::from_utf8_lossy(&raw_ml).to_string(),
             parts,
+            resources,
         },
     ))
 }

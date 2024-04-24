@@ -1,7 +1,7 @@
 use epub_builder::{EpubBuilder, EpubContent, Result, ZipLibrary};
 use kf8::constants::MetadataId;
-use kf8::parse_book;
-use std::io::Read;
+use kf8::{parse_book, ResourceKind};
+use std::io::{Cursor, Read};
 
 use clap::Parser;
 
@@ -34,13 +34,15 @@ fn process(args: Args) -> Result<()> {
 
     let mut builder = EpubBuilder::new(ZipLibrary::new()?)?;
 
+    // Text
     for part in book.parts {
         builder.add_content(EpubContent::new(part.filename, part.content.as_bytes()))?;
     }
 
     builder.set_title(book.book_header.title);
 
-    if let Some(metadata) = book.book_header.exth {
+    // Metadata
+    if let Some(metadata) = book.book_header.standard_metadata {
         if let Some(creators) = metadata.get(&MetadataId::Creator) {
             for creator in creators {
                 builder.add_author(creator);
@@ -54,6 +56,32 @@ fn process(args: Args) -> Result<()> {
         if let Some(descriptions) = metadata.get(&MetadataId::Description) {
             for description in descriptions {
                 builder.add_description(description);
+            }
+        }
+    }
+
+    // Resources
+    for resource in book.resources {
+        match resource.kind {
+            ResourceKind::Cover => {
+                builder.add_cover_image(
+                    format!("cover.{}", resource.file_type.extension()),
+                    Cursor::new(resource.data),
+                    resource.file_type.mime_type(),
+                )?;
+            }
+            ResourceKind::Thumbnail => {
+                // todo
+            }
+            ResourceKind::Image => {
+                builder.add_resource(
+                    "todo",
+                    Cursor::new(resource.data),
+                    resource.file_type.mime_type(),
+                )?;
+            }
+            ResourceKind::Font => {
+                todo!()
             }
         }
     }

@@ -224,7 +224,7 @@ impl TryFrom<u32> for SubLanguage {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, TryFromPrimitive, Hash)]
+#[derive(Debug, Eq, PartialEq, TryFromPrimitive, Hash, Clone)]
 #[repr(u32)]
 pub enum MetadataId {
     DrmServerId = 1,
@@ -390,7 +390,7 @@ impl fmt::Display for MetadataId {
     }
 }
 
-#[derive(Debug, TryFromPrimitive)]
+#[derive(Debug, TryFromPrimitive, PartialEq, Eq, Clone, Hash)]
 #[repr(u32)] // Assuming the values fit in u16, change if needed
 pub enum MetadataIdValue {
     #[num_enum(default)]
