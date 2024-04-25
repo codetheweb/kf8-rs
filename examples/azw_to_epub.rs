@@ -2,8 +2,8 @@ use chrono::DateTime;
 use epub_builder::{EpubBuilder, EpubContent, Result, ZipLibrary};
 use kf8::constants::MetadataId;
 use kf8::{parse_book, ResourceKind};
+use regex::{Captures, RegexBuilder};
 use std::io::{Cursor, Read};
-use uuid::Uuid;
 
 use clap::Parser;
 
@@ -36,9 +36,30 @@ fn process(args: Args) -> Result<()> {
 
     let mut builder = EpubBuilder::new(ZipLibrary::new()?)?;
 
+    let flow_pattern = RegexBuilder::new(r#"['"]kindle:flow:([0-9|A-V]+)\?mime=([^'"]+)['"]"#)
+        .case_insensitive(true)
+        .build()
+        .unwrap();
+
     // Text
     for part in book.parts {
-        builder.add_content(EpubContent::new(part.filename, part.content.as_bytes()))?;
+        let updated_content = flow_pattern
+            .replace_all(&part.content, |captures: &Captures| {
+                let flow_index = usize::from_str_radix(&captures[1], 10);
+                let href = match &captures[2] {
+                    "text/css" => {
+                        format!("styles_{}.css", flow_index.unwrap_or_default())
+                    }
+                    _ => {
+                        panic!("Unsupported flow type {}", &captures[1])
+                    }
+                };
+
+                format!("\"{}\"", href)
+            })
+            .to_string();
+
+        builder.add_content(EpubContent::new(part.filename, updated_content.as_bytes()))?;
     }
 
     builder.set_title(&book.book_header.title);
@@ -89,12 +110,12 @@ fn process(args: Args) -> Result<()> {
     // todo: set the ID using the book_header.unique_id (unsupported by epub library?)
 
     // Resources
-    for resource in book.resources {
+    for resource in &book.resources {
         match resource.kind {
             ResourceKind::Cover => {
                 builder.add_cover_image(
                     format!("cover.{}", resource.file_type.extension()),
-                    Cursor::new(resource.data),
+                    Cursor::new(resource.data.clone()),
                     resource.file_type.mime_type(),
                 )?;
             }
@@ -105,12 +126,19 @@ fn process(args: Args) -> Result<()> {
             ResourceKind::Image => {
                 builder.add_resource(
                     "todo",
-                    Cursor::new(resource.data),
+                    Cursor::new(resource.data.clone()),
                     resource.file_type.mime_type(),
                 )?;
             }
             ResourceKind::Font => {
                 todo!()
+            }
+            ResourceKind::Stylesheet => {
+                builder.add_resource(
+                    format!("styles_{}.css", resource.flow_index.unwrap_or_default()),
+                    Cursor::new(resource.data.clone()),
+                    resource.file_type.mime_type(),
+                )?;
             }
         }
     }

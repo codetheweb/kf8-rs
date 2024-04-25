@@ -397,12 +397,13 @@ pub struct MobiBookPart {
     pub content: String,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ResourceKind {
     Cover,
     Thumbnail,
     Image,
     Font,
+    Stylesheet,
 }
 
 #[derive(Debug)]
@@ -410,6 +411,7 @@ pub struct Resource {
     pub kind: ResourceKind,
     pub data: Vec<u8>,
     pub file_type: infer::Type,
+    pub flow_index: Option<usize>,
 }
 
 #[derive(Debug)]
@@ -543,6 +545,21 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
     // Resources
     let mut resources: Vec<Resource> = vec![];
 
+    // todo: handle SVGs/images, CDATA?
+    let stylesheets = flows.iter().skip(1);
+
+    let mut info = infer::Infer::new();
+    info.add("text/css", "css", |_| true);
+
+    for (i, stylesheet) in stylesheets.enumerate() {
+        resources.push(Resource {
+            kind: ResourceKind::Stylesheet,
+            data: stylesheet.to_vec(),
+            file_type: info.get(stylesheet).unwrap(),
+            flow_index: Some(i + 1),
+        });
+    }
+
     let cover_offset = book_header.first_resource_section_index
         + *book_header
             .kf8_metadata
@@ -615,12 +632,14 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
                         kind: ResourceKind::Cover,
                         data: data.to_vec(),
                         file_type: file_type.unwrap(),
+                        flow_index: None,
                     })
                 } else if section_i == thumbnail_offset {
                     resources.push(Resource {
                         kind: ResourceKind::Thumbnail,
                         data: data.to_vec(),
                         file_type: file_type.unwrap(),
+                        flow_index: None,
                     })
                 }
             }
