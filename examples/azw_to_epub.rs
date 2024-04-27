@@ -2,8 +2,14 @@ use chrono::DateTime;
 use epub_builder::{EpubBuilder, EpubContent, Result, ZipLibrary};
 use kf8::constants::MetadataId;
 use kf8::{parse_book, ResourceKind};
-use regex::{Captures, RegexBuilder};
+use quick_xml::events::attributes::Attribute;
+use quick_xml::events::{BytesStart, Event};
+use quick_xml::name::QName;
+use regex::{Regex, RegexBuilder};
 use std::io::{Cursor, Read};
+
+#[macro_use]
+extern crate lazy_static;
 
 use clap::Parser;
 
@@ -27,6 +33,53 @@ fn main() {
     process(args).unwrap();
 }
 
+lazy_static! {
+    static ref FLOW_PATTERN: Regex =
+        RegexBuilder::new(r#"kindle:flow:([0-9|A-V]+)\?mime=([^'"]+)"#)
+            .case_insensitive(true)
+            .build()
+            .unwrap();
+}
+
+fn transform_element(mut element: BytesStart) -> BytesStart {
+    element.clear_attributes();
+
+    for attribute in element.clone().attributes() {
+        let attribute = attribute.as_ref().unwrap();
+
+        match attribute.key {
+            // Remap aid="" to id=""
+            QName(b"aid") => {
+                element.push_attribute(Attribute::from(("id".as_bytes(), &attribute.value[..])));
+            }
+            // Map flow links (kindle:flow:...) to local resources
+            QName(b"href") if element.name() == QName(b"link") => {
+                let value = attribute.value.to_vec();
+                let value = String::from_utf8(value).unwrap();
+                let captures = FLOW_PATTERN.captures(&value).unwrap();
+                let flow_index = usize::from_str_radix(&captures[1], 10).unwrap();
+                let mime_type = &captures[2];
+
+                let href = match mime_type {
+                    "text/css" => {
+                        format!("styles_{}.css", flow_index)
+                    }
+                    _ => {
+                        panic!("Unsupported flow type {}", mime_type)
+                    }
+                };
+
+                element.push_attribute(Attribute::from(("href".as_bytes(), href.as_bytes())));
+            }
+            _ => {
+                element.push_attribute(attribute.clone());
+            }
+        }
+    }
+
+    return element;
+}
+
 fn process(args: Args) -> Result<()> {
     let mut reader = std::fs::File::open(args.input).unwrap();
     let mut data = Vec::new();
@@ -36,30 +89,36 @@ fn process(args: Args) -> Result<()> {
 
     let mut builder = EpubBuilder::new(ZipLibrary::new()?)?;
 
-    let flow_pattern = RegexBuilder::new(r#"['"]kindle:flow:([0-9|A-V]+)\?mime=([^'"]+)['"]"#)
-        .case_insensitive(true)
-        .build()
-        .unwrap();
-
     // Text
     for part in book.parts {
-        let updated_content = flow_pattern
-            .replace_all(&part.content, |captures: &Captures| {
-                let flow_index = usize::from_str_radix(&captures[1], 10);
-                let href = match &captures[2] {
-                    "text/css" => {
-                        format!("styles_{}.css", flow_index.unwrap_or_default())
-                    }
-                    _ => {
-                        panic!("Unsupported flow type {}", &captures[1])
-                    }
-                };
+        let mut reader = quick_xml::reader::Reader::from_str(&part.content);
+        let mut writer = quick_xml::writer::Writer::new(Cursor::new(Vec::new()));
 
-                format!("\"{}\"", href)
-            })
-            .to_string();
+        loop {
+            match reader.read_event() {
+                Ok(Event::Eof) => {
+                    break;
+                }
+                Ok(Event::Start(element)) => {
+                    let new_element = transform_element(element);
+                    writer.write_event(&Event::Start(new_element)).unwrap();
+                }
+                Ok(Event::Empty(element)) => {
+                    let new_element = transform_element(element);
+                    writer.write_event(&Event::Empty(new_element)).unwrap();
+                }
+                Ok(event) => {
+                    writer.write_event(&event).unwrap();
+                }
+                Err(e) => {
+                    panic!("Error at position {}: {:?}", reader.buffer_position(), e);
+                }
+            }
+        }
 
-        builder.add_content(EpubContent::new(part.filename, updated_content.as_bytes()))?;
+        let mut cursor = writer.into_inner();
+        cursor.set_position(0);
+        builder.add_content(EpubContent::new(part.filename, cursor))?;
     }
 
     builder.set_title(&book.book_header.title);

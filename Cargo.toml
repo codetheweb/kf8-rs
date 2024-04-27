@@ -15,4 +15,5 @@ palmdoc-compression = { path = "../palmdoc-compression", features = ["calibre"]}
 chrono = "0.4.38"
 clap = { version = "4.5.4", features = ["derive"] }
 epub-builder = "0.7.4"
+quick-xml = "0.31.0"
 regex = "1.10.4"
