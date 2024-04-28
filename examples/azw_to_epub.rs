@@ -1,5 +1,5 @@
 use chrono::DateTime;
-use epub_builder::{EpubBuilder, EpubContent, Result, ZipLibrary};
+use epub_builder::{EpubBuilder, EpubContent, EpubVersion, Result, ZipLibrary};
 use kf8::constants::MetadataId;
 use kf8::{parse_book, ResourceKind};
 use quick_xml::events::attributes::Attribute;
@@ -41,16 +41,28 @@ lazy_static! {
             .unwrap();
 }
 
-fn transform_element(mut element: BytesStart) -> BytesStart {
+fn transform_element(element: &mut BytesStart) {
+    let cloned = element.clone();
+    let attributes = cloned.attributes();
     element.clear_attributes();
 
-    for attribute in element.clone().attributes() {
+    for attribute in attributes.clone() {
         let attribute = attribute.as_ref().unwrap();
 
         match attribute.key {
             // Remap aid="" to id=""
             QName(b"aid") => {
-                element.push_attribute(Attribute::from(("id".as_bytes(), &attribute.value[..])));
+                if attributes
+                    .clone()
+                    .any(|a| a.as_ref().unwrap().key == QName(b"id"))
+                {
+                    continue;
+                }
+
+                element.push_attribute(Attribute::from((
+                    "id".as_bytes(),
+                    [b"aid-", &attribute.value[..]].concat().as_slice(),
+                )));
             }
             // Map flow links (kindle:flow:...) to local resources
             QName(b"href") if element.name() == QName(b"link") => {
@@ -76,8 +88,6 @@ fn transform_element(mut element: BytesStart) -> BytesStart {
             }
         }
     }
-
-    return element;
 }
 
 fn process(args: Args) -> Result<()> {
@@ -88,6 +98,7 @@ fn process(args: Args) -> Result<()> {
     let (_, book) = parse_book(&data).unwrap();
 
     let mut builder = EpubBuilder::new(ZipLibrary::new()?)?;
+    builder.epub_version(EpubVersion::V30);
 
     // Text
     for part in book.parts {
@@ -99,13 +110,15 @@ fn process(args: Args) -> Result<()> {
                 Ok(Event::Eof) => {
                     break;
                 }
-                Ok(Event::Start(element)) => {
-                    let new_element = transform_element(element);
-                    writer.write_event(&Event::Start(new_element)).unwrap();
+                Ok(Event::Start(mut element)) => {
+                    transform_element(&mut element);
+
+                    writer.write_event(&Event::Start(element)).unwrap();
                 }
-                Ok(Event::Empty(element)) => {
-                    let new_element = transform_element(element);
-                    writer.write_event(&Event::Empty(new_element)).unwrap();
+                Ok(Event::Empty(mut element)) => {
+                    transform_element(&mut element);
+
+                    writer.write_event(&Event::Empty(element)).unwrap();
                 }
                 Ok(event) => {
                     writer.write_event(&event).unwrap();
