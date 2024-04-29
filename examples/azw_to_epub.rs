@@ -1,12 +1,13 @@
 use chrono::DateTime;
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, Result, ZipLibrary};
 use kf8::constants::MetadataId;
-use kf8::{parse_book, ResourceKind};
+use kf8::{parse_book, MobiBook, ResourceKind};
 use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::QName;
 use regex::{Regex, RegexBuilder};
 use std::io::{Cursor, Read};
+use std::iter::once;
 
 #[macro_use]
 extern crate lazy_static;
@@ -41,7 +42,7 @@ lazy_static! {
             .unwrap();
 }
 
-fn transform_element(element: &mut BytesStart) {
+fn transform_element(element: &mut BytesStart, book: &MobiBook) {
     let cloned = element.clone();
     let attributes = cloned.attributes();
     element.clear_attributes();
@@ -83,6 +84,15 @@ fn transform_element(element: &mut BytesStart) {
 
                 element.push_attribute(Attribute::from(("href".as_bytes(), href.as_bytes())));
             }
+            QName(b"href") if attribute.value.starts_with(b"kindle:pos:fid") => {
+                element.push_attribute(Attribute::from((
+                    "href".as_bytes(),
+                    "https://example.com/".as_bytes(),
+                    // book.get_id_for_position_href(&attribute.value)
+                    //     .unwrap()
+                    //     .as_bytes(),
+                )));
+            }
             _ => {
                 element.push_attribute(attribute.clone());
             }
@@ -101,8 +111,15 @@ fn process(args: Args) -> Result<()> {
     builder.epub_version(EpubVersion::V30);
 
     // Text
-    for part in book.parts {
-        let mut reader = quick_xml::reader::Reader::from_str(&part.content);
+    for part in &book.parts {
+        let content_raw = once(part.skeleton_head.clone())
+            .chain(part.fragments.iter().map(|f| f.content.clone()))
+            .chain(once(part.skeleton_tail.clone()))
+            .collect::<Vec<Vec<u8>>>()
+            .concat();
+        let content = String::from_utf8(content_raw).unwrap();
+
+        let mut reader = quick_xml::reader::Reader::from_str(&content);
         let mut writer = quick_xml::writer::Writer::new(Cursor::new(Vec::new()));
 
         loop {
@@ -111,12 +128,12 @@ fn process(args: Args) -> Result<()> {
                     break;
                 }
                 Ok(Event::Start(mut element)) => {
-                    transform_element(&mut element);
+                    transform_element(&mut element, &book);
 
                     writer.write_event(&Event::Start(element)).unwrap();
                 }
                 Ok(Event::Empty(mut element)) => {
-                    transform_element(&mut element);
+                    transform_element(&mut element, &book);
 
                     writer.write_event(&Event::Empty(element)).unwrap();
                 }
@@ -131,7 +148,7 @@ fn process(args: Args) -> Result<()> {
 
         let mut cursor = writer.into_inner();
         cursor.set_position(0);
-        builder.add_content(EpubContent::new(part.filename, cursor))?;
+        builder.add_content(EpubContent::new(part.filename.clone(), cursor))?;
     }
 
     builder.set_title(&book.book_header.title);

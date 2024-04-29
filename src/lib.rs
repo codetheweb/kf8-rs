@@ -8,7 +8,9 @@ use nom::{
     IResult,
 };
 use std::{
-    collections::HashMap,
+    collections::{BTreeMap, HashMap},
+    hash::Hash,
+    io::Cursor,
     iter::once,
     str::{self, FromStr},
 };
@@ -392,9 +394,17 @@ fn parse_book_header<'a>(
 }
 
 #[derive(Debug, PartialEq)]
+pub struct MobiBookFragment {
+    pub index: usize,
+    pub content: Vec<u8>,
+}
+
+#[derive(Debug, PartialEq)]
 pub struct MobiBookPart {
     pub filename: String,
-    pub content: String,
+    pub skeleton_head: Vec<u8>,
+    pub fragments: Vec<MobiBookFragment>,
+    pub skeleton_tail: Vec<u8>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -508,9 +518,10 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
     {
         let mut base_ptr = skeleton_entry.start_offset + skeleton_entry.len;
 
-        let mut assembled_text = text
-            [skeleton_entry.start_offset..skeleton_entry.start_offset + skeleton_entry.len]
-            .to_vec();
+        let mut fragments: Vec<MobiBookFragment> = vec![];
+
+        let first_fragment = fragment_table.get(fragment_i).unwrap();
+        let split_skeleton_at = first_fragment.insert_position as usize;
 
         // todo: zip?
         let mut filename: String = "".to_string();
@@ -522,23 +533,25 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
             }
 
             let fragment_text = &text[base_ptr..base_ptr + fragment_entry.len as usize];
-            let fragment_insert_position =
-                (fragment_entry.insert_position as usize) - skeleton_entry.start_offset;
 
-            assembled_text = [
-                &assembled_text[..fragment_insert_position],
-                fragment_text,
-                &assembled_text[fragment_insert_position..],
-            ]
-            .concat();
+            fragments.push(MobiBookFragment {
+                index: fragment_i,
+                content: fragment_text.to_vec(),
+            });
 
             base_ptr += fragment_entry.len as usize;
             fragment_i += 1;
         }
 
+        let skeleton_head = &text[skeleton_entry.start_offset..split_skeleton_at];
+        let skeleton_tail =
+            &text[split_skeleton_at..skeleton_entry.start_offset + skeleton_entry.len];
+
         parts.push(MobiBookPart {
-            content: String::from_utf8(assembled_text).unwrap(),
             filename,
+            skeleton_head: skeleton_head.to_vec(),
+            fragments,
+            skeleton_tail: skeleton_tail.to_vec(),
         });
     }
 
