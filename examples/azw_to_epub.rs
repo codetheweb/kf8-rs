@@ -42,6 +42,22 @@ lazy_static! {
             .unwrap();
 }
 
+lazy_static! {
+    static ref POSITION_FID_PATTERN: Regex =
+        RegexBuilder::new(r#"kindle:pos:fid:([0-9|A-V]+):off:([0-9|A-V]+)"#)
+            .case_insensitive(true)
+            .build()
+            .unwrap();
+}
+
+lazy_static! {
+    static ref ID_OR_NAME_OR_AID_PATTERN: Regex =
+        RegexBuilder::new(r#"\s(id|name|aid)\s*=\s*['"]([^'"]*)['"]"#)
+            .case_insensitive(true)
+            .build()
+            .unwrap();
+}
+
 fn transform_element(element: &mut BytesStart, book: &MobiBook) {
     let cloned = element.clone();
     let attributes = cloned.attributes();
@@ -85,12 +101,33 @@ fn transform_element(element: &mut BytesStart, book: &MobiBook) {
                 element.push_attribute(Attribute::from(("href".as_bytes(), href.as_bytes())));
             }
             QName(b"href") if attribute.value.starts_with(b"kindle:pos:fid") => {
+                let value = attribute.value.to_vec();
+                let value = String::from_utf8(value).unwrap();
+                let captures = POSITION_FID_PATTERN.captures(&value).unwrap();
+                let absolute_fragment_index = usize::from_str_radix(&captures[1], 32).unwrap();
+                let offset = usize::from_str_radix(&captures[2], 32).unwrap();
+
+                let fragment = book.fragment_table.get(absolute_fragment_index).unwrap();
+                let position = fragment.insert_position as usize + offset;
+
+                let part = book
+                    .parts
+                    .iter()
+                    .find(|part| position >= part.start_offset && position < part.end_offset)
+                    .unwrap();
+
+                let offset = position - part.start_offset;
+                let content = part.get_content();
+                let selected_content = String::from_utf8_lossy(&content[offset..]);
+
+                let captures = ID_OR_NAME_OR_AID_PATTERN
+                    .captures(&selected_content)
+                    .unwrap();
+                let attribute_value = captures.get(2).unwrap().as_str();
+
                 element.push_attribute(Attribute::from((
                     "href".as_bytes(),
-                    "https://example.com/".as_bytes(),
-                    // book.get_id_for_position_href(&attribute.value)
-                    //     .unwrap()
-                    //     .as_bytes(),
+                    format!("{}#{}", part.filename, attribute_value).as_bytes(),
                 )));
             }
             _ => {

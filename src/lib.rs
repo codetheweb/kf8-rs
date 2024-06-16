@@ -1,16 +1,15 @@
 use nom::{
     branch::alt,
     bytes::complete::{tag, take, take_while},
-    combinator::{cond, map},
+    combinator::map,
     multi::count,
     number::complete::{be_u16, be_u24, be_u32, be_u8},
     sequence::tuple,
     IResult,
 };
 use std::{
-    collections::{BTreeMap, HashMap},
-    hash::Hash,
-    io::Cursor,
+    collections::HashMap,
+    io::{BufRead, Read},
     iter::once,
     str::{self, FromStr},
 };
@@ -405,6 +404,20 @@ pub struct MobiBookPart {
     pub skeleton_head: Vec<u8>,
     pub fragments: Vec<MobiBookFragment>,
     pub skeleton_tail: Vec<u8>,
+    pub start_offset: usize,
+    pub end_offset: usize,
+}
+
+impl MobiBookPart {
+    pub fn get_content(&self) -> Vec<u8> {
+        let mut content = Vec::new();
+        content.extend_from_slice(&self.skeleton_head);
+        for fragment in &self.fragments {
+            content.extend_from_slice(&fragment.content);
+        }
+        content.extend_from_slice(&self.skeleton_tail);
+        content
+    }
 }
 
 #[derive(Debug, PartialEq)]
@@ -428,6 +441,7 @@ pub struct Resource {
 pub struct MobiBook {
     mobi_header: MobiHeader,
     pub book_header: BookHeader,
+    pub fragment_table: Vec<FragmentTableEntry>,
     content: String,
     pub parts: Vec<MobiBookPart>,
     pub resources: Vec<Resource>,
@@ -552,6 +566,8 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
             skeleton_head: skeleton_head.to_vec(),
             fragments,
             skeleton_tail: skeleton_tail.to_vec(),
+            start_offset: skeleton_entry.start_offset,
+            end_offset: base_ptr,
         });
     }
 
@@ -664,6 +680,7 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
         MobiBook {
             mobi_header,
             book_header,
+            fragment_table,
             // todo: this should not be lossy
             content: String::from_utf8_lossy(&raw_ml).to_string(),
             parts,
@@ -745,8 +762,8 @@ fn index_table_to_skeleton_table(table_entries: &[IndexTableEntry]) -> Vec<Skele
 }
 
 #[derive(Debug)]
-struct FragmentTableEntry {
-    insert_position: u32,
+pub struct FragmentTableEntry {
+    pub insert_position: u32,
     id_text: String,
     file_number: u32,
     seq_number: u32,
