@@ -421,10 +421,15 @@ impl MobiBookPart {
 }
 
 #[derive(Debug, PartialEq)]
-pub enum ResourceKind {
+pub enum ImageResourceKind {
     Cover,
     Thumbnail,
-    Image,
+    Other,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ResourceKind {
+    Image(ImageResourceKind),
     Font,
     Stylesheet,
 }
@@ -658,14 +663,21 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
 
                 if section_i == cover_offset {
                     resources.push(Resource {
-                        kind: ResourceKind::Cover,
+                        kind: ResourceKind::Image(ImageResourceKind::Cover),
                         data: data.to_vec(),
                         file_type: file_type.unwrap(),
                         flow_index: None,
                     })
                 } else if section_i == thumbnail_offset {
                     resources.push(Resource {
-                        kind: ResourceKind::Thumbnail,
+                        kind: ResourceKind::Image(ImageResourceKind::Thumbnail),
+                        data: data.to_vec(),
+                        file_type: file_type.unwrap(),
+                        flow_index: None,
+                    })
+                } else {
+                    resources.push(Resource {
+                        kind: ResourceKind::Image(ImageResourceKind::Other),
                         data: data.to_vec(),
                         file_type: file_type.unwrap(),
                         flow_index: None,

@@ -1,7 +1,7 @@
 use chrono::DateTime;
 use epub_builder::{EpubBuilder, EpubContent, EpubVersion, Result, ZipLibrary};
 use kf8::constants::MetadataId;
-use kf8::{parse_book, MobiBook, ResourceKind};
+use kf8::{parse_book, ImageResourceKind, MobiBook, ResourceKind};
 use quick_xml::events::attributes::Attribute;
 use quick_xml::events::{BytesStart, Event};
 use quick_xml::name::QName;
@@ -58,7 +58,15 @@ lazy_static! {
             .unwrap();
 }
 
-fn transform_element(element: &mut BytesStart, book: &MobiBook) {
+lazy_static! {
+    static ref EMBED_PATTERN: Regex =
+        RegexBuilder::new(r#"kindle:embed:([0-9|A-V]+)\?mime=([^'"]+)"#)
+            .case_insensitive(true)
+            .build()
+            .unwrap();
+}
+
+fn transform_element(element: &mut BytesStart, image_paths: &Vec<String>, book: &MobiBook) {
     let cloned = element.clone();
     let attributes = cloned.attributes();
     element.clear_attributes();
@@ -100,6 +108,7 @@ fn transform_element(element: &mut BytesStart, book: &MobiBook) {
 
                 element.push_attribute(Attribute::from(("href".as_bytes(), href.as_bytes())));
             }
+            // Remap kindle:pos:fid:... to filenames and anchors (href="filename#anchor")
             QName(b"href") if attribute.value.starts_with(b"kindle:pos:fid") => {
                 let value = attribute.value.to_vec();
                 let value = String::from_utf8(value).unwrap();
@@ -130,6 +139,18 @@ fn transform_element(element: &mut BytesStart, book: &MobiBook) {
                     format!("{}#{}", part.filename, attribute_value).as_bytes(),
                 )));
             }
+            // Map kindle:embed:... to local resources (for images)
+            QName(b"src") if element.name() == QName(b"img") => {
+                let value = attribute.value.to_vec();
+                let value = String::from_utf8(value).unwrap();
+                let captures = EMBED_PATTERN.captures(&value);
+                let image_index = usize::from_str_radix(&captures.unwrap()[1], 32).unwrap() - 1;
+
+                element.push_attribute(Attribute::from((
+                    "src".as_bytes(),
+                    image_paths[image_index].as_bytes(),
+                )));
+            }
             _ => {
                 element.push_attribute(attribute.clone());
             }
@@ -146,6 +167,53 @@ fn process(args: Args) -> Result<()> {
 
     let mut builder = EpubBuilder::new(ZipLibrary::new()?)?;
     builder.epub_version(EpubVersion::V30);
+
+    // Resources
+    let mut image_paths = Vec::new();
+    // todo: cleaner
+    let mut image_i = 0;
+    for resource in &book.resources {
+        match resource.kind {
+            ResourceKind::Image(ImageResourceKind::Cover) => {
+                let path = format!("cover.{}", resource.file_type.extension());
+                image_paths.push(path.clone());
+
+                builder.add_cover_image(
+                    path,
+                    Cursor::new(resource.data.clone()),
+                    resource.file_type.mime_type(),
+                )?;
+            }
+            // todo: handle thumbnail separately?
+            ResourceKind::Image(..) => {
+                let path = format!("images/{}.{}", image_i, resource.file_type.extension());
+                image_paths.push(path.clone());
+
+                builder.add_resource(
+                    path,
+                    Cursor::new(resource.data.clone()),
+                    resource.file_type.mime_type(),
+                )?;
+            }
+            ResourceKind::Font => {
+                todo!()
+            }
+            ResourceKind::Stylesheet => {
+                builder.add_resource(
+                    format!("styles_{}.css", resource.flow_index.unwrap_or_default()),
+                    Cursor::new(resource.data.clone()),
+                    resource.file_type.mime_type(),
+                )?;
+            }
+        }
+
+        match resource.kind {
+            ResourceKind::Image(..) => {
+                image_i += 1;
+            }
+            _ => (),
+        }
+    }
 
     // Text
     for part in &book.parts {
@@ -165,12 +233,12 @@ fn process(args: Args) -> Result<()> {
                     break;
                 }
                 Ok(Event::Start(mut element)) => {
-                    transform_element(&mut element, &book);
+                    transform_element(&mut element, &image_paths, &book);
 
                     writer.write_event(&Event::Start(element)).unwrap();
                 }
                 Ok(Event::Empty(mut element)) => {
-                    transform_element(&mut element, &book);
+                    transform_element(&mut element, &image_paths, &book);
 
                     writer.write_event(&Event::Empty(element)).unwrap();
                 }
@@ -234,40 +302,6 @@ fn process(args: Args) -> Result<()> {
     }
 
     // todo: set the ID using the book_header.unique_id (unsupported by epub library?)
-
-    // Resources
-    for resource in &book.resources {
-        match resource.kind {
-            ResourceKind::Cover => {
-                builder.add_cover_image(
-                    format!("cover.{}", resource.file_type.extension()),
-                    Cursor::new(resource.data.clone()),
-                    resource.file_type.mime_type(),
-                )?;
-            }
-            ResourceKind::Thumbnail => {
-                // Don't output thumbnails
-                continue;
-            }
-            ResourceKind::Image => {
-                builder.add_resource(
-                    "todo",
-                    Cursor::new(resource.data.clone()),
-                    resource.file_type.mime_type(),
-                )?;
-            }
-            ResourceKind::Font => {
-                todo!()
-            }
-            ResourceKind::Stylesheet => {
-                builder.add_resource(
-                    format!("styles_{}.css", resource.flow_index.unwrap_or_default()),
-                    Cursor::new(resource.data.clone()),
-                    resource.file_type.mime_type(),
-                )?;
-            }
-        }
-    }
 
     let writer = std::fs::File::create(args.output).unwrap();
     builder.generate(writer)?;
