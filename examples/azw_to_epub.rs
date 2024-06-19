@@ -144,12 +144,16 @@ fn transform_element(element: &mut BytesStart, image_paths: &Vec<String>, book: 
                 let value = attribute.value.to_vec();
                 let value = String::from_utf8(value).unwrap();
                 let captures = EMBED_PATTERN.captures(&value);
-                let image_index = usize::from_str_radix(&captures.unwrap()[1], 32).unwrap() - 1;
 
-                element.push_attribute(Attribute::from((
-                    "src".as_bytes(),
-                    image_paths[image_index].as_bytes(),
-                )));
+                // todo: should log a warning here?
+                if let Some(captures) = captures {
+                    let image_index = usize::from_str_radix(&captures[1], 32).unwrap() - 1;
+
+                    element.push_attribute(Attribute::from((
+                        "src".as_bytes(),
+                        image_paths[image_index].as_bytes(),
+                    )));
+                }
             }
             _ => {
                 element.push_attribute(attribute.clone());
