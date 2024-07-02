@@ -13,6 +13,7 @@ use std::{
     iter::once,
     str::{self, FromStr},
 };
+use types::{CompressionType, MobiHeader, MobiHeaderIdent, SectionHeader};
 
 use crate::{
     constants::{MainLanguage, MetadataId, MetadataIdValue, SubLanguage},
@@ -22,28 +23,10 @@ use crate::{
 #[macro_use]
 extern crate lazy_static;
 
+pub mod builder;
 pub mod constants;
 mod tag_map;
-
-#[derive(Debug, PartialEq)]
-pub struct SectionHeader {
-    offset: u32,
-    flags: u8,
-    val: u32,
-}
-
-#[derive(Debug, PartialEq)]
-enum MobiHeaderIdent {
-    BookMobi,
-    TextRead,
-}
-
-#[derive(Debug, PartialEq)]
-enum CompressionType {
-    None,
-    PalmDoc,
-    HuffCdic,
-}
+pub mod types;
 
 fn parse_compression_type(input: &[u8]) -> IResult<&[u8], CompressionType> {
     alt((
@@ -51,14 +34,6 @@ fn parse_compression_type(input: &[u8]) -> IResult<&[u8], CompressionType> {
         map(tag([0x00, 0x02]), |_| CompressionType::PalmDoc),
         map(tag([0x44, 0x48]), |_| CompressionType::HuffCdic),
     ))(input)
-}
-
-#[derive(Debug, PartialEq)]
-pub struct MobiHeader {
-    name: String,
-    num_sections: u16,
-    ident: MobiHeaderIdent,
-    section_headers: Vec<SectionHeader>,
 }
 
 fn parse_name(input: &[u8]) -> IResult<&[u8], String> {
@@ -93,10 +68,6 @@ fn parse_mobi_header(input: &[u8]) -> IResult<&[u8], MobiHeader> {
     let (input, _) = take(4usize)(input)?;
     let (input, num_sections) = be_u16(input)?;
 
-    if num_sections == 0 {
-        todo!("should return error")
-    }
-
     let (_, name) = parse_name(header)?;
     let (_, ident) = parse_ident(&header[0x3C..])?;
 
@@ -106,6 +77,8 @@ fn parse_mobi_header(input: &[u8]) -> IResult<&[u8], MobiHeader> {
         section_headers.push(section_header);
         input = i;
     }
+
+    let (input, _) = tag([0x00, 0x00])(input)?;
 
     Ok((
         input,
@@ -890,7 +863,10 @@ fn parse_indx_header(input: &[u8]) -> IResult<&[u8], INDXHeader> {
 
 #[cfg(test)]
 mod tests {
-    use std::io::{Read, Write};
+    use builder::write_mobi_header;
+    use cookie_factory::gen;
+    use proptest::proptest;
+    use types::mobi_header;
 
     use super::*;
 
@@ -910,5 +886,17 @@ mod tests {
             .unwrap();
 
         assert_eq!(book.content, expected_html);
+    }
+
+    proptest! {
+        #[test]
+        fn roundtrip(header in mobi_header()) {
+            let serialized = Vec::new();
+            let (serialized, _) = gen(write_mobi_header(&header), serialized).expect("could not serialize");
+            let (leftover, parsed) = parse_mobi_header(&serialized).expect("could not parse");
+
+            assert_eq!(header, parsed);
+            assert_eq!(0, leftover.len());
+        }
     }
 }
