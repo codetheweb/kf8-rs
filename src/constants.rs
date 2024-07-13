@@ -1,8 +1,12 @@
 use std::fmt;
 
-use num_enum::TryFromPrimitive;
+use num_enum::{IntoPrimitive, TryFromPrimitive};
+#[cfg(test)]
+use proptest_derive::Arbitrary;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, IntoPrimitive)]
+#[cfg_attr(test, derive(Arbitrary))]
+#[repr(u8)]
 pub enum MainLanguage {
     Afrikaans = 54,
     Albanian = 28,
@@ -81,6 +85,7 @@ pub enum MainLanguage {
     Zulu = 53,
 }
 
+// todo: duplicated?
 impl TryFrom<u32> for MainLanguage {
     type Error = ();
 
@@ -248,28 +253,30 @@ impl MainLanguage {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, IntoPrimitive)]
+#[cfg_attr(test, derive(Arbitrary))]
+#[repr(u8)]
 pub enum SubLanguage {
-    UzbekLatin,
-    UzbekCyrillic,
-    SerbianCyrillic,
-    SpanishGuatemala,
-    SpanishCostaRica,
-    SpanishPanama,
-    SpanishDominicanRepublic,
-    SpanishVenezuela,
-    SpanishColombia,
-    SpanishPeru,
-    SpanishArgentina,
-    SpanishEcuador,
-    SpanishChile,
-    SpanishUruguay,
-    SpanishParaguay,
-    SpanishBolivia,
-    SpanishElSalvador,
-    SpanishHonduras,
-    SpanishNicaragua,
-    SpanishPuertoRico,
+    UzbekLatin = 1,
+    UzbekCyrillic = 2,
+    SerbianCyrillic = 3,
+    SpanishGuatemala = 4,
+    SpanishCostaRica = 5,
+    SpanishPanama = 6,
+    SpanishDominicanRepublic = 7,
+    SpanishVenezuela = 8,
+    SpanishColombia = 9,
+    SpanishPeru = 10,
+    SpanishArgentina = 11,
+    SpanishEcuador = 12,
+    SpanishChile = 13,
+    SpanishUruguay = 14,
+    SpanishParaguay = 15,
+    SpanishBolivia = 16,
+    SpanishElSalvador = 17,
+    SpanishHonduras = 18,
+    SpanishNicaragua = 19,
+    SpanishPuertoRico = 20,
 }
 
 impl TryFrom<u32> for SubLanguage {
@@ -330,6 +337,7 @@ impl SubLanguage {
 }
 
 #[derive(Debug, Eq, PartialEq, TryFromPrimitive, Hash, Clone)]
+#[cfg_attr(test, derive(Arbitrary))]
 #[repr(u32)]
 pub enum MetadataId {
     DrmServerId = 1,
@@ -496,6 +504,7 @@ impl fmt::Display for MetadataId {
 }
 
 #[derive(Debug, TryFromPrimitive, PartialEq, Eq, Clone, Hash)]
+#[cfg_attr(test, derive(Arbitrary))]
 #[repr(u32)] // Assuming the values fit in u16, change if needed
 pub enum MetadataIdValue {
     #[num_enum(default)]
