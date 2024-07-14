@@ -119,87 +119,6 @@ pub struct K8Header {
     fdst_count: u32,
 }
 
-#[derive(Debug)]
-enum ExthKeyValue {
-    ID(MetadataId, String),
-    Value(MetadataIdValue, u32),
-}
-
-fn parse_exth_key_value(input: &[u8]) -> IResult<&[u8], ExthKeyValue> {
-    let (input, id) = be_u32(input)?;
-
-    let (input, content_len) = be_u32(input)?;
-    let (input, content) = take(content_len as usize - 8)(input)?;
-
-    if let Ok(id) = MetadataId::try_from(id) {
-        let parsed = String::from_utf8(content.to_vec()).unwrap();
-
-        return Ok((input, ExthKeyValue::ID(id, parsed)));
-    } else if let Ok(id) = MetadataIdValue::try_from(id) {
-        let value: u32 = match content_len {
-            9 => be_u8(content)?.1 as u32,
-            10 => be_u16(content)?.1 as u32,
-            12 => be_u32(content)?.1 as u32,
-            _ => panic!(),
-        };
-
-        return Ok((input, ExthKeyValue::Value(id, value)));
-    }
-
-    panic!()
-}
-
-fn parse_exth(
-    input: &[u8],
-) -> IResult<
-    &[u8],
-    (
-        HashMap<MetadataId, Vec<String>>,
-        HashMap<MetadataIdValue, Vec<u32>>,
-    ),
-> {
-    let (input, _) = take(4usize)(input)?;
-    let (input, len) = be_u32(input)?;
-
-    let (input, num_items) = be_u32(input)?;
-
-    let (input, items) = count(parse_exth_key_value, num_items as usize)(input)?;
-
-    let mut standard_metadata: HashMap<MetadataId, Vec<String>> = HashMap::new();
-    let mut kf8_metadata: HashMap<MetadataIdValue, Vec<u32>> = HashMap::new();
-    for item in items {
-        match item {
-            ExthKeyValue::ID(id, content) => standard_metadata.entry(id).or_default().push(content),
-            ExthKeyValue::Value(id, data) => kf8_metadata.entry(id).or_default().push(data),
-        }
-    }
-
-    Ok((input, (standard_metadata, kf8_metadata)))
-}
-
-fn parse_language_code(
-    input: &[u8],
-) -> IResult<&[u8], (Option<MainLanguage>, Option<SubLanguage>)> {
-    let (input, langcode) = be_u32(input)?;
-
-    let langid = langcode & 0xff;
-    let sublangid = (langcode >> 10) & 0xff;
-
-    // todo: don't unwrap
-    let language = if langid == 0 {
-        None
-    } else {
-        MainLanguage::try_from(langid).ok()
-    };
-    let sub_language = if sublangid == 0 {
-        None
-    } else {
-        SubLanguage::try_from(sublangid).ok()
-    };
-
-    Ok((input, (language, sub_language)))
-}
-
 fn parse_book_header<'a>(data: &'a [u8]) -> IResult<&'a [u8], BookHeader> {
     let (_, header) =
         crate::serialization::MobiHeader::from_bytes((data, 0)).expect("could not parse header");
@@ -764,18 +683,6 @@ mod tests {
             let (leftover, parsed) = parse_mobi_header(&serialized).expect("could not parse");
 
             assert_eq!(header, parsed);
-            assert_eq!(0, leftover.len());
-        }
-
-        #[test]
-        fn roundtrip_language_code(header in any::<BookHeader>()) {
-            let serialized = Vec::new();
-            let (serialized, _) = gen(write_language(header.language.clone(), header.sub_language.clone()), serialized).expect("could not serialize");
-            let (leftover, (language, sub_language)) = parse_language_code(&serialized).expect("could not parse");
-
-            assert_eq!(header.language, language);
-            assert_eq!(header.sub_language, sub_language);
-
             assert_eq!(0, leftover.len());
         }
 

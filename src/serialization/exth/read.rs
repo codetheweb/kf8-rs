@@ -7,10 +7,13 @@ use nom::{
     IResult,
 };
 
-use crate::{
-    constants::{MetadataId, MetadataIdValue},
-    ExthKeyValue,
-};
+use crate::constants::{MetadataId, MetadataIdValue};
+
+#[derive(Debug)]
+enum ExthKeyValue {
+    ID(MetadataId, String),
+    Value(MetadataIdValue, u32),
+}
 
 fn read_exth_key_value(input: &[u8]) -> IResult<&[u8], ExthKeyValue> {
     let (input, id) = nom::number::complete::be_u32(input)?;
