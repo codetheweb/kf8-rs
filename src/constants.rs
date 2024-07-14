@@ -336,7 +336,7 @@ impl SubLanguage {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, TryFromPrimitive, Hash, Clone)]
+#[derive(Debug, Eq, PartialEq, TryFromPrimitive, IntoPrimitive, Hash, Clone)]
 #[cfg_attr(test, derive(Arbitrary))]
 #[repr(u32)]
 pub enum MetadataId {
@@ -503,7 +503,7 @@ impl fmt::Display for MetadataId {
     }
 }
 
-#[derive(Debug, TryFromPrimitive, PartialEq, Eq, Clone, Hash)]
+#[derive(Debug, TryFromPrimitive, IntoPrimitive, PartialEq, Eq, Clone, Hash)]
 #[cfg_attr(test, derive(Arbitrary))]
 #[repr(u32)] // Assuming the values fit in u16, change if needed
 pub enum MetadataIdValue {

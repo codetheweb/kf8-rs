@@ -1,14 +1,25 @@
-use std::collections::HashMap;
-
+use deku::prelude::*;
 #[cfg(test)]
 use proptest::{arbitrary::any, prop_compose};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
+use std::collections::HashMap;
 
 use crate::{
     constants::{MainLanguage, MetadataId, MetadataIdValue, SubLanguage},
+    serialization::ExtraDataFlags,
     K8Header,
 };
+
+#[derive(Debug, PartialEq, DekuRead, DekuWrite)]
+#[deku(id_type = "u32", ctx = "endian: deku::ctx::Endian", endian = "endian")]
+#[cfg_attr(test, derive(Arbitrary))]
+pub enum Codepage {
+    #[deku(id = "0x000004e4")]
+    Cp1252,
+    #[deku(id = "0x0000fde9")]
+    Utf8,
+}
 
 #[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(test, derive(Arbitrary))]
@@ -32,11 +43,15 @@ pub enum DocType {
     Mobi,
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, DekuRead, DekuWrite, Clone)]
 #[cfg_attr(test, derive(Arbitrary))]
+#[deku(id_type = "u16", ctx = "endian: deku::ctx::Endian", endian = "endian")]
 pub enum CompressionType {
+    #[deku(id = 0x0001)]
     None,
+    #[deku(id = 0x0002)]
     PalmDoc,
+    #[deku(id = 0x4448)]
     HuffCdic,
 }
 
@@ -76,8 +91,7 @@ pub struct BookHeader {
     pub language: Option<MainLanguage>,
     pub sub_language: Option<SubLanguage>,
     pub ncxidx: u32,
-    // todo: enum/split up/rename
-    pub extra_flags: Option<u16>,
+    pub extra_flags: ExtraDataFlags,
     pub k8: Option<K8Header>,
     pub title: String,
     pub standard_metadata: Option<HashMap<MetadataId, Vec<String>>>,
@@ -89,7 +103,6 @@ impl BookHeader {
     pub fn sizeof_trailing_section_entries(&self, section_data: &[u8]) -> usize {
         let mut num = 0;
         let size = section_data.len();
-        let mut flags = self.extra_flags.unwrap() >> 1;
 
         fn sizeof_trailing_section_entry(section_data: &[u8], offset: usize) -> usize {
             let mut offset = offset;
@@ -108,15 +121,17 @@ impl BookHeader {
             }
         }
 
-        while flags > 0 {
-            if flags & 1 > 0 {
+        let mut encoded_flags = self.extra_flags.encode() >> 1;
+
+        while encoded_flags > 0 {
+            if encoded_flags & 1 > 0 {
                 num += sizeof_trailing_section_entry(section_data, size - num);
             }
 
-            flags >>= 1;
+            encoded_flags >>= 1;
         }
 
-        if self.extra_flags.unwrap() & 1 > 0 {
+        if self.extra_flags.extra_multibyte_bytes_after_text_records {
             let offset = size - num - 1;
             num += (section_data[offset] as usize & 0x3) + 1;
         }

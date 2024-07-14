@@ -124,8 +124,9 @@ pub fn write_book_header<'a, W: Write + 'a>(header: &'a BookHeader) -> impl Seri
             be_u16(header.encryption_type),
             // Unused
             be_u16(0),
-            slice("MOBI"),                   // todo
-            be_u32(264),                     // todo: length
+            slice("MOBI"), // todo
+            // Header length
+            be_u32(264),
             be_u32(0),                       // todo: type field
             write_codepage(&Codepage::Utf8), // todo
             be_u32(header.unique_id),
@@ -144,11 +145,11 @@ pub fn write_book_header<'a, W: Write + 'a>(header: &'a BookHeader) -> impl Seri
             be_u32(header.title.as_bytes().len() as u32),
             write_language(header.language.clone(), header.sub_language.clone()),
             // 4 bytes of padding?
-            slice(&[0x00; 4]),
-            be_u32(0), // todo: mobi version
+            slice(&[0x00; 8]), // todo: dictionary langs
+            be_u32(0),         // todo: mobi version
             be_u32(header.first_resource_section_index as u32),
             // Huff/CDIC compression
-            slice(&[0x00, 16]),
+            slice(&[0x00; 16]),
             // EXTH flags
             be_u32(0), // todo
             // Unknown
