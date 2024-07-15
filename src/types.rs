@@ -1,7 +1,5 @@
 use deku::prelude::*;
 #[cfg(test)]
-use proptest::{arbitrary::any, prop_compose};
-#[cfg(test)]
 use proptest_derive::Arbitrary;
 use std::collections::HashMap;
 
@@ -53,28 +51,6 @@ pub enum CompressionType {
     PalmDoc,
     #[deku(id = 0x4448)]
     HuffCdic,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct MobiHeader {
-    pub name: String,
-    // todo: should remove this field
-    pub num_sections: u16,
-    pub ident: MobiHeaderIdent,
-    pub section_headers: Vec<SectionHeader>,
-}
-
-#[cfg(test)]
-prop_compose! {
-    // name is limited to valid ASCII characters rather than UTF-8 because otherwise the codepoint splitting gets weird
-    pub fn mobi_header()(name in "[\x01-\x7F]{0,31}", ident in any::<MobiHeaderIdent>(), section_headers in any::<Vec<SectionHeader>>()) -> MobiHeader {
-        MobiHeader {
-            name,
-            num_sections: section_headers.len() as u16,
-            ident,
-            section_headers
-        }
-    }
 }
 
 #[derive(Debug, PartialEq)]

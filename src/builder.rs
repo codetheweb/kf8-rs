@@ -10,7 +10,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
     constants::{MainLanguage, SubLanguage},
-    types::{BookHeader, CompressionType, MobiHeader, MobiHeaderIdent, SectionHeader},
+    serialization::{PalmDocHeader, Record},
+    types::{BookHeader, CompressionType, MobiHeaderIdent, SectionHeader},
     Codepage,
 };
 
@@ -64,11 +65,11 @@ fn write_ident<W: Write>(ident: &MobiHeaderIdent) -> impl SerializeFn<W> {
     }
 }
 
-fn write_section_header<W: Write>(header: &SectionHeader) -> impl SerializeFn<W> {
+fn write_section_header<W: Write>(header: &Record) -> impl SerializeFn<W> {
     tuple((
         be_u32(header.offset),
-        be_u8(header.flags),
-        be_u24(header.val),
+        // be_u8(header.flags),
+        // be_u24(header.val),
     ))
 }
 
@@ -80,14 +81,16 @@ fn write_num_section_headers<W: Write>(num_sections: u16) -> impl SerializeFn<W>
     ))
 }
 
-pub fn write_palmdb_header<'a, W: Write + 'a>(header: &'a MobiHeader) -> impl SerializeFn<W> + 'a {
+pub fn write_palmdb_header<'a, W: Write + 'a>(
+    header: &'a PalmDocHeader,
+) -> impl SerializeFn<W> + 'a {
     tuple((
-        write_name(&header.name),
+        write_name(&header.title),
         write_created_at(),
-        write_ident(&header.ident),
+        write_ident(&MobiHeaderIdent::BookMobi),
         // todo: should be called records
-        write_num_section_headers(header.num_sections),
-        all(header.section_headers.iter().map(write_section_header)),
+        write_num_section_headers(header.records.len() as u16),
+        all(header.records.iter().map(write_section_header)),
         be_u16(0x00),
     ))
 }
