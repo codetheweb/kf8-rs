@@ -7,7 +7,7 @@ use nom::{
 };
 #[cfg(test)]
 use proptest_derive::Arbitrary;
-use serialization::{IndxHeader, PalmDocHeader};
+use serialization::{FDSTTable, IndxHeader, PalmDocHeader};
 use std::{
     collections::HashMap,
     iter::once,
@@ -196,12 +196,12 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
         book_header.k8.clone().unwrap().fdst as usize,
     );
 
-    let (_, fdst_table) = parse_fdst(fdst_section_data, raw_ml.len()).unwrap();
+    let (_, fdst_table) = FDSTTable::from_bytes((fdst_section_data, 0)).unwrap();
 
     let mut flows = Vec::new();
 
-    for (starts_at, ends_at) in fdst_table.iter().zip(fdst_table.iter().skip(1)) {
-        let flow = &raw_ml[*starts_at..*ends_at];
+    for entry in fdst_table.entries {
+        let flow = &raw_ml[(entry.start as usize)..(entry.end as usize)];
         flows.push(flow);
     }
 
@@ -497,22 +497,6 @@ fn parse_indx_text_segment(input: &[u8]) -> IResult<&[u8], String> {
 
     // todo: remove unwrap
     Ok((input, String::from_utf8(segment.to_vec()).unwrap()))
-}
-
-fn parse_fdst(input: &[u8], raw_ml_len: usize) -> IResult<&[u8], Vec<usize>> {
-    let (input, _) = tag(b"FDST")(input)?;
-    let (input, _) = take(4usize)(input)?;
-    let (input, num_sections) = be_u32(input)?;
-    let (input, sections) = count(be_u32, num_sections as usize * 2)(input)?;
-
-    let positions = sections
-        .iter()
-        .step_by(2)
-        .map(|x| *x as usize)
-        .chain(once(raw_ml_len))
-        .collect();
-
-    Ok((input, positions))
 }
 
 fn parse_indx_header(input: &[u8]) -> IResult<&[u8], IndxHeader> {
