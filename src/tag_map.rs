@@ -1,11 +1,10 @@
+use deku::DekuContainerRead;
 use nom::{
-    bytes::complete::{tag, take},
-    combinator::peek,
-    multi::count,
-    number::complete::{be_u32, be_u8},
-    IResult,
+    bytes::complete::take, combinator::peek, multi::count, number::complete::be_u8, IResult,
 };
 use std::collections::HashMap;
+
+use crate::serialization::{TagTable, TagTableEntry};
 
 // Decode variable width value from given bytes.
 fn get_variable_width_value(data: &[u8]) -> IResult<&[u8], u32> {
@@ -22,50 +21,15 @@ fn get_variable_width_value(data: &[u8]) -> IResult<&[u8], u32> {
     Ok((&data[consumed..], value))
 }
 
-#[derive(Debug)]
-pub struct TagTableEntry {
-    pub tag: u8,
-    pub values_per_entry: u8,
-    pub mask: u8,
-    pub end_flag: u8,
-}
-
-#[derive(Debug)]
-pub struct TagSection {
-    pub control_byte_count: usize,
-    pub table: Vec<TagTableEntry>,
-}
-
 // Read tag section from given data.
-pub fn parse_tag_section(data: &[u8]) -> IResult<&[u8], TagSection> {
-    let (remaining, _) = tag(b"TAGX")(data)?;
-    let (remaining, first_entry_offset) = be_u32(remaining)?;
-    let (mut remaining, control_byte_count) = be_u32(remaining)?;
-    let mut table = Vec::new();
-    let mut offset = 12; // Skip the first 12 bytes already read above.
-    while offset < first_entry_offset as usize {
-        let (rem, tag) = take(4usize)(remaining)?;
-        table.push(TagTableEntry {
-            tag: tag[0],
-            values_per_entry: tag[1],
-            mask: tag[2],
-            end_flag: tag[3],
-        });
-        offset += 4;
-        remaining = rem;
-    }
-    Ok((
-        remaining,
-        TagSection {
-            control_byte_count: control_byte_count as usize,
-            table,
-        },
-    ))
+pub fn parse_tag_section(data: &[u8]) -> IResult<&[u8], TagTable> {
+    let ((remaining, _), table) = TagTable::from_bytes((data, 0)).unwrap();
+
+    Ok((remaining, table))
 }
 
 // Create a map of tags and values from the given byte section.
 pub fn parse_tag_map<'a>(
-    control_byte_count: usize,
     tag_table: &Vec<TagTableEntry>,
     data: &'a [u8],
 ) -> IResult<&'a [u8], HashMap<u8, Vec<u32>>> {

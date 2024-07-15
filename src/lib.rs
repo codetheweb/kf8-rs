@@ -426,12 +426,7 @@ fn parse_index_data<'a>(
             let (remaining, segment) =
                 parse_indx_text_segment(&data[*beginning_offset as usize..])?;
 
-            let (_, tag_map) = parse_tag_map(
-                tag_section.control_byte_count,
-                &tag_section.table,
-                remaining,
-            )
-            .unwrap();
+            let (_, tag_map) = parse_tag_map(&tag_section.tags, remaining).unwrap();
 
             skeleton_table.push(IndexTableEntry {
                 file_number: i,
