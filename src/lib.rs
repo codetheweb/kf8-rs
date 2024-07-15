@@ -3,15 +3,13 @@ use nom::{
     bytes::complete::{tag, take},
     multi::count,
     number::complete::{be_u16, be_u32, be_u8},
-    sequence::tuple,
     IResult,
 };
 #[cfg(test)]
 use proptest_derive::Arbitrary;
-use serialization::PalmDocHeader;
+use serialization::{IndxHeader, PalmDocHeader};
 use std::{
     collections::HashMap,
-    io::{BufRead, Read},
     iter::once,
     str::{self, FromStr},
 };
@@ -417,12 +415,12 @@ fn parse_index_data<'a>(
 
     let mut skeleton_table = vec![];
 
-    for i in (section_i + 1)..(section_i + 1 + indx_header.count as usize) {
+    for i in (section_i + 1)..(section_i + 1 + indx_header.num_entries as usize) {
         let data = get_section_data(original_input, mobi_header, i);
         let (_, header) = parse_indx_header(data).unwrap();
 
         let (_, indx_offsets) =
-            count(be_u16, header.count as usize)(&data[header.start as usize + 4..])?;
+            count(be_u16, header.num_entries as usize)(&data[header.block_offset as usize + 4..])?;
 
         for (i, beginning_offset) in indx_offsets.iter().enumerate() {
             let (remaining, segment) =
@@ -517,74 +515,16 @@ fn parse_fdst(input: &[u8], raw_ml_len: usize) -> IResult<&[u8], Vec<usize>> {
     Ok((input, positions))
 }
 
-#[derive(Debug)]
-struct INDXHeader {
-    len: u32,
-    nul1: u32,
-    type_field: u32,
-    gen: u32,
-    start: u32,
-    count: u32,
-    code: u32,
-    lng: u32,
-    total: u32,
-    ordt: u32,
-    ligt: u32,
-    nligt: u32,
-    nctoc: u32,
-    ordt1: Option<Vec<u8>>,
-    ordt2: Option<Vec<u16>>,
-}
+fn parse_indx_header(input: &[u8]) -> IResult<&[u8], IndxHeader> {
+    let ((input, _), header) = IndxHeader::from_bytes((input, 0)).expect("could not parse header");
 
-fn parse_indx_header(input: &[u8]) -> IResult<&[u8], INDXHeader> {
-    let (input, _) = tag(b"INDX")(input)?;
-
-    let (
-        input,
-        (len, nul1, type_field, gen, start, count, code, lng, total, ordt, ligt, nligt, nctoc),
-    ) = tuple((
-        be_u32, be_u32, be_u32, be_u32, be_u32, be_u32, be_u32, be_u32, be_u32, be_u32, be_u32,
-        be_u32, be_u32,
-    ))(input)?;
-
-    let (input, (ocnt, oentries, op1, op2, _otagx)) =
-        tuple((be_u32, be_u32, be_u32, be_u32, be_u32))(input)?;
-
-    let ordt1;
-    let ordt2;
-
-    if code == 0xfdea || ocnt != 0 || oentries > 0 {
-        ordt1 = Some(take(oentries as usize)(input)?.1.to_vec());
-        ordt2 = Some(nom::multi::count(be_u16, oentries as usize)(input)?.1);
-    } else {
-        ordt1 = None;
-        ordt2 = None;
-    }
-
-    Ok((
-        input,
-        INDXHeader {
-            len,
-            nul1,
-            type_field,
-            gen,
-            start,
-            count,
-            code,
-            lng,
-            total,
-            ordt,
-            ligt,
-            nligt,
-            nctoc,
-            ordt1,
-            ordt2,
-        },
-    ))
+    Ok((input, header))
 }
 
 #[cfg(test)]
 mod tests {
+    use std::io::Read;
+
     use builder::write_book_header;
     use cookie_factory::gen;
     use proptest::{arbitrary::any, proptest};
