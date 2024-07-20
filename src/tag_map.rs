@@ -1,22 +1,18 @@
+use deku::reader::Reader;
 use nom::{
     bytes::complete::take, combinator::peek, multi::count, number::complete::be_u8, IResult,
 };
-use std::collections::HashMap;
+use std::{collections::HashMap, io::Cursor};
 
-use crate::serialization::TagTableEntry;
+use crate::{serialization::TagTableEntry, utils::deku::read_big_endian_variable_width_value};
 
 // Decode variable width value from given bytes.
 fn get_variable_width_value(data: &[u8]) -> IResult<&[u8], u32> {
-    // todo: more idiomatic
-    let mut value = 0;
-    let mut consumed = 0;
-    let mut finished = false;
-    while !finished {
-        let v = data[consumed];
-        consumed += 1;
-        finished = (v & 0x80) != 0;
-        value = (value << 7) | (v & 0x7F) as u32;
-    }
+    let mut reader = Cursor::new(data);
+    let mut reader = Reader::new(&mut reader);
+    let value = read_big_endian_variable_width_value(&mut reader).unwrap();
+    let consumed = reader.into_inner().position() as usize;
+
     Ok((&data[consumed..], value))
 }
 
