@@ -1,10 +1,9 @@
-use deku::DekuContainerRead;
 use nom::{
     bytes::complete::take, combinator::peek, multi::count, number::complete::be_u8, IResult,
 };
 use std::collections::HashMap;
 
-use crate::serialization::{TagTable, TagTableEntry};
+use crate::serialization::TagTableEntry;
 
 // Decode variable width value from given bytes.
 fn get_variable_width_value(data: &[u8]) -> IResult<&[u8], u32> {
@@ -19,13 +18,6 @@ fn get_variable_width_value(data: &[u8]) -> IResult<&[u8], u32> {
         value = (value << 7) | (v & 0x7F) as u32;
     }
     Ok((&data[consumed..], value))
-}
-
-// Read tag section from given data.
-pub fn parse_tag_section(data: &[u8]) -> IResult<&[u8], TagTable> {
-    let ((remaining, _), table) = TagTable::from_bytes((data, 0)).unwrap();
-
-    Ok((remaining, table))
 }
 
 // Create a map of tags and values from the given byte section.

@@ -4,10 +4,7 @@ use deku::prelude::*;
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use crate::{
-    constants::{MainLanguage, SubLanguage},
-    types::{Codepage, CompressionType},
-};
+use crate::constants::{MainLanguage, SubLanguage};
 
 use super::exth::Exth;
 
@@ -112,6 +109,28 @@ impl<Ctx> DekuWriter<Ctx> for ExtraDataFlags {
     }
 }
 
+#[derive(Debug, PartialEq, DekuRead, DekuWrite)]
+#[deku(id_type = "u32", ctx = "endian: deku::ctx::Endian", endian = "endian")]
+#[cfg_attr(test, derive(Arbitrary))]
+pub enum Codepage {
+    #[deku(id = "0x000004e4")]
+    Cp1252,
+    #[deku(id = "0x0000fde9")]
+    Utf8,
+}
+
+#[derive(Debug, PartialEq, DekuRead, DekuWrite, Clone)]
+#[cfg_attr(test, derive(Arbitrary))]
+#[deku(id_type = "u16", ctx = "endian: deku::ctx::Endian", endian = "endian")]
+pub enum CompressionType {
+    #[deku(id = 0x0001)]
+    None,
+    #[deku(id = 0x0002)]
+    PalmDoc,
+    #[deku(id = 0x4448)]
+    HuffCdic,
+}
+
 #[deku_derive(DekuRead, DekuWrite)]
 #[deku(endian = "big")]
 #[derive(Debug, PartialEq)]
@@ -202,6 +221,57 @@ pub struct MobiHeader {
         writer = "crate::utils::deku::write_string(deku::writer, title)"
     )]
     pub title: String,
+}
+
+impl MobiHeader {
+    pub fn sizeof_trailing_section_entries(&self, section_data: &[u8]) -> usize {
+        let mut num = 0;
+        let size = section_data.len();
+
+        fn sizeof_trailing_section_entry(section_data: &[u8], offset: usize) -> usize {
+            let mut offset = offset;
+            let mut bitpos = 0;
+            let mut result: usize = 0;
+
+            loop {
+                let v = section_data[offset - 1] as usize;
+                result |= (v & 0x7f) << bitpos;
+                bitpos += 7;
+                offset -= 1;
+
+                if (v & 0x80) != 0 || (bitpos >= 28) || offset == 0 {
+                    return result;
+                }
+            }
+        }
+
+        let mut encoded_flags = self.extra_data_flags.encode() >> 1;
+
+        while encoded_flags > 0 {
+            if encoded_flags & 1 > 0 {
+                num += sizeof_trailing_section_entry(section_data, size - num);
+            }
+
+            encoded_flags >>= 1;
+        }
+
+        if self
+            .extra_data_flags
+            .extra_multibyte_bytes_after_text_records
+        {
+            let offset = size - num - 1;
+            num += (section_data[offset] as usize & 0x3) + 1;
+        }
+
+        num
+    }
+
+    pub fn get_bcp47_language_tag(&self) -> Option<&'static str> {
+        return self.language_code.sub.as_ref().map_or(
+            self.language_code.main.as_ref().map(|l| l.to_bcp47()),
+            |l| Some(l.to_bcp47()),
+        );
+    }
 }
 
 #[cfg(test)]
