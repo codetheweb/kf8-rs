@@ -12,30 +12,10 @@ use std::{collections::HashMap, str::FromStr};
 
 use crate::{constants::MetadataIdValue, tag_map::parse_tag_map};
 
-#[macro_use]
-extern crate lazy_static;
-
 pub mod constants;
 mod serialization;
 mod tag_map;
 mod utils;
-
-fn parse_mobi_header(input: &[u8]) -> IResult<&[u8], PalmDocHeader> {
-    let ((input, _), header) =
-        PalmDocHeader::from_bytes((&input, 0)).expect("could not parse header");
-
-    Ok((input, header))
-}
-
-#[derive(Debug, PartialEq, Clone)]
-#[cfg_attr(test, derive(Arbitrary))]
-pub struct K8Header {
-    skelidx: u32,
-    fragidx: u32,
-    guideidx: u32,
-    fdst: u32,
-    fdst_count: u32,
-}
 
 #[derive(Debug, PartialEq)]
 pub struct MobiBookFragment {
@@ -114,7 +94,8 @@ fn get_section_data<'a>(data: &'a [u8], mobi_header: &PalmDocHeader, section_i: 
 pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
     let original_input = input;
     let original_input_length = input.len();
-    let (input, mobi_header) = parse_mobi_header(input)?;
+    let ((input, _), mobi_header) =
+        PalmDocHeader::from_bytes((&input, 0)).expect("could not parse header");
 
     let (input, _) = take(2usize)(input)?; // Skip 2 bytes
 
