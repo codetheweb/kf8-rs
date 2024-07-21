@@ -1,11 +1,12 @@
 use deku::prelude::*;
 use nom::{
     bytes::complete::take,
+    error::Error,
     multi::count,
     number::complete::{be_u16, be_u8},
     IResult,
 };
-use serialization::{FDSTTable, IndxHeader, MobiHeader, PalmDocHeader, TagTable};
+use serialization::{FDSTTable, IndxHeader, MobiHeader, PalmDoc, TagTable};
 use std::{collections::HashMap, str::FromStr};
 
 use crate::{constants::MetadataIdValue, tag_map::parse_tag_map};
@@ -67,8 +68,7 @@ pub struct Resource {
 
 #[derive(Debug)]
 pub struct MobiBook {
-    // todo: rename
-    mobi_header: PalmDocHeader,
+    palmdoc: PalmDoc,
     pub book_header: MobiHeader,
     pub fragment_table: Vec<FragmentTableEntry>,
     content: String,
@@ -76,43 +76,27 @@ pub struct MobiBook {
     pub resources: Vec<Resource>,
 }
 
-// todo: rename
-fn get_section_data<'a>(data: &'a [u8], mobi_header: &PalmDocHeader, section_i: usize) -> &'a [u8] {
-    let end_offset = if section_i == (mobi_header.records.len() - 1).into() {
-        data.len()
-    } else {
-        mobi_header.records[section_i + 1].offset as usize
-    };
-
-    let section_header = &mobi_header.records[section_i];
-
-    &data[section_header.offset as usize..end_offset]
-}
-
 pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
     let original_input = input;
-    let original_input_length = input.len();
-    let ((input, _), mobi_header) =
-        PalmDocHeader::from_bytes((&input, 0)).expect("could not parse header");
+    let ((input, _), palmdoc) =
+        PalmDoc::from_bytes((&input, 0)).expect("could not parse header");
 
     let (input, _) = take(2usize)(input)?; // Skip 2 bytes
 
     // todo: use first section offset instead of manually skipping bytes above?
-    let (_, book_header) = crate::serialization::MobiHeader::from_bytes((
-        &original_input[mobi_header.records.first().unwrap().offset as usize..],
-        0,
-    ))
-    .expect("could not parse header");
+    let (_, book_header) =
+        crate::serialization::MobiHeader::from_bytes((&palmdoc.records.first().unwrap(), 0))
+            .expect("could not parse header");
 
     // todo: assert that header is k8?
 
     let mut raw_ml = Vec::new();
-    for (i, section_header) in mobi_header.records.iter().enumerate().skip(1) {
+    for (i, section_header) in palmdoc.records.iter().enumerate().skip(1) {
         if i > book_header.last_text_record as usize {
             break;
         }
 
-        let section_data = get_section_data(original_input, &mobi_header, i);
+        let section_data = palmdoc.records[i].as_slice();
         let section_data = &section_data
             [..section_data.len() - book_header.sizeof_trailing_section_entries(section_data)];
 
@@ -122,11 +106,7 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
     }
 
     // Parse flow boundaries
-    let fdst_section_data = get_section_data(
-        original_input,
-        &mobi_header,
-        book_header.fdst_record as usize,
-    );
+    let fdst_section_data = palmdoc.records[book_header.fdst_record as usize].as_slice();
 
     let (_, fdst_table) = FDSTTable::from_bytes((fdst_section_data, 0)).unwrap();
 
@@ -141,15 +121,17 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
 
     let (_, skeleton_table) = parse_index_data(
         original_input,
-        &mobi_header,
+        &palmdoc,
         book_header.skel_index as usize,
-    )?;
+    )
+    .unwrap();
 
     let (_, fragment_table) = parse_index_data(
         original_input,
-        &mobi_header,
+        &palmdoc,
         book_header.chunk_index as usize,
-    )?;
+    )
+    .unwrap();
 
     let fragment_table = index_table_to_fragment_table(&fragment_table);
 
@@ -237,9 +219,9 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
             .first()
             .unwrap() as usize;
 
-    for section_i in book_header.first_resource_record as usize..mobi_header.records.len() {
-        let data = get_section_data(original_input, &mobi_header, section_i);
-        let (input, resource_type) = take(4usize)(data)?;
+    for section_i in book_header.first_resource_record as usize..palmdoc.records.len() {
+        let data = palmdoc.records[section_i].as_slice();
+        let (input, resource_type) = take::<usize, &[u8], Error<&[u8]>>(4usize)(data).unwrap();
 
         match resource_type {
             b"FLIS" | b"FCIS" | b"FDST" | b"DATP" => {
@@ -313,7 +295,7 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
     Ok((
         input,
         MobiBook {
-            mobi_header,
+            palmdoc: palmdoc.clone(),
             book_header,
             fragment_table,
             // todo: this should not be lossy
@@ -333,20 +315,20 @@ struct IndexTableEntry {
 
 fn parse_index_data<'a>(
     original_input: &'a [u8],
-    mobi_header: &PalmDocHeader,
+    palmdoc: &'a PalmDoc,
     section_i: usize,
 ) -> IResult<&'a [u8], Vec<IndexTableEntry>> {
     // Parse INDX header
-    let indx_section_data = get_section_data(original_input, mobi_header, section_i);
+    let indx_section_data = palmdoc.records[section_i].as_slice();
     let (_, indx_header) = parse_indx_header(indx_section_data).unwrap();
 
     let (_, tag_section) =
         TagTable::from_bytes((&indx_section_data[indx_header.len as usize..], 0)).unwrap();
 
-    let mut skeleton_table = vec![];
+    let mut index_table = vec![];
 
     for i in (section_i + 1)..(section_i + 1 + indx_header.num_entries as usize) {
-        let data = get_section_data(original_input, mobi_header, i);
+        let data = palmdoc.records[i].as_slice();
         let (_, header) = parse_indx_header(data).unwrap();
 
         let (_, indx_offsets) =
@@ -358,7 +340,7 @@ fn parse_index_data<'a>(
 
             let (_, tag_map) = parse_tag_map(&tag_section.tags, remaining).unwrap();
 
-            skeleton_table.push(IndexTableEntry {
+            index_table.push(IndexTableEntry {
                 file_number: i,
                 label: segment,
                 tag_map,
@@ -366,7 +348,7 @@ fn parse_index_data<'a>(
         }
     }
 
-    Ok((&[], skeleton_table))
+    Ok((&[], index_table))
 }
 
 #[derive(Debug)]
