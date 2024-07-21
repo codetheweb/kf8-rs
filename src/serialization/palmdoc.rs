@@ -1,5 +1,6 @@
 use std::io::{Read, Write};
 
+use deku::bitvec::*;
 use deku::prelude::*;
 #[cfg(test)]
 use proptest_derive::Arbitrary;
@@ -7,13 +8,11 @@ use proptest_derive::Arbitrary;
 #[deku_derive(DekuRead, DekuWrite)]
 #[deku(ctx = "endian: deku::ctx::Endian", endian = "endian")]
 #[derive(Debug, PartialEq)]
-#[cfg_attr(test, derive(Arbitrary))]
 struct PalmDocRecordOffset {
     offset: u32,
     #[deku(temp, temp_value = "0")]
     _unused_flags: u8,
     #[deku(bytes = "3")]
-    #[cfg_attr(test, proptest(strategy = "0..=u32::from(ux::u24::MAX)"))]
     unique_id: u32,
 }
 
@@ -27,6 +26,7 @@ fn escape_title(title: &String) -> String {
 
 fn read_records<R: Read>(
     reader: &mut deku::reader::Reader<R>,
+    num_records: u16,
     record_offsets: &Vec<PalmDocRecordOffset>,
 ) -> Result<Vec<Vec<u8>>, DekuError> {
     let mut records = Vec::new();
@@ -38,6 +38,28 @@ fn read_records<R: Read>(
         records.push(record);
     }
 
+    // Last record
+    if records.len() < num_records as usize {
+        let mut last_record = Vec::new();
+        // todo: more efficient
+
+        let mut byte = [0; 1];
+        while let Ok(r) = reader.read_bytes_const(&mut byte) {
+            match r {
+                deku::reader::ReaderRet::Bytes => {
+                    last_record.push(byte[0]);
+                }
+                deku::reader::ReaderRet::Bits(b) => {
+                    // WHY!!!!
+                    let value: u8 = b.unwrap().load_be::<u8>();
+                    last_record.push(value);
+                }
+            }
+        }
+
+        records.push(last_record);
+    }
+
     Ok(records)
 }
 
@@ -46,6 +68,24 @@ fn write_records<W: Write>(
     records: &Vec<Vec<u8>>,
 ) -> Result<(), DekuError> {
     writer.write_bytes(records.concat().as_slice())?;
+    Ok(())
+}
+
+fn write_record_offsets<W: Write>(
+    writer: &mut deku::writer::Writer<W>,
+    records: &Vec<Vec<u8>>,
+) -> Result<(), DekuError> {
+    let mut offset = 78 + (8 * records.len()) + 2;
+    for (i, record) in records.iter().enumerate() {
+        PalmDocRecordOffset {
+            offset: offset as u32,
+            // todo: correct?
+            unique_id: i as u32,
+        }
+        .to_writer(writer, deku::ctx::Endian::Big)?;
+        offset += record.len();
+    }
+
     Ok(())
 }
 
@@ -87,12 +127,16 @@ pub struct PalmDoc {
     _unused_next_record_list_id: u32,
     #[deku(temp, temp_value = "records.len() as u16")]
     num_records: u16,
-    #[deku(temp, count = "num_records")]
-    record_metadata: Vec<PalmDocRecordOffset>,
+    #[deku(
+        temp,
+        count = "num_records",
+        writer = "write_record_offsets(deku::writer, records)"
+    )]
+    record_offsets: Vec<PalmDocRecordOffset>,
     #[deku(temp, temp_value = "[0; 2]")]
     _padding: [u8; 2],
     #[deku(
-        reader = "read_records(deku::reader, record_metadata)",
+        reader = "read_records(deku::reader, *num_records, record_offsets)",
         writer = "write_records(deku::writer, records)"
     )]
     pub records: Vec<Vec<u8>>,
@@ -116,7 +160,7 @@ mod tests {
 
         serialized.set_position(0);
         let mut reader = Reader::new(&mut serialized);
-        let decoded = PalmDoc::from_reader_with_ctx(&mut reader, ()).unwrap();
+        let decoded = PalmDoc::from_reader_with_ctx(&mut reader, ()).expect("could not parse");
 
         assert_eq!(header, decoded);
       }

@@ -78,8 +78,7 @@ pub struct MobiBook {
 
 pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
     let original_input = input;
-    let ((input, _), palmdoc) =
-        PalmDoc::from_bytes((&input, 0)).expect("could not parse header");
+    let (_, palmdoc) = PalmDoc::from_bytes((&input, 0)).expect("could not parse header");
 
     let (input, _) = take(2usize)(input)?; // Skip 2 bytes
 
@@ -119,19 +118,11 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
 
     let text = *flows.first().unwrap();
 
-    let (_, skeleton_table) = parse_index_data(
-        original_input,
-        &palmdoc,
-        book_header.skel_index as usize,
-    )
-    .unwrap();
+    let (_, skeleton_table) =
+        parse_index_data(original_input, &palmdoc, book_header.skel_index as usize).unwrap();
 
-    let (_, fragment_table) = parse_index_data(
-        original_input,
-        &palmdoc,
-        book_header.chunk_index as usize,
-    )
-    .unwrap();
+    let (_, fragment_table) =
+        parse_index_data(original_input, &palmdoc, book_header.chunk_index as usize).unwrap();
 
     let fragment_table = index_table_to_fragment_table(&fragment_table);
 
@@ -426,7 +417,7 @@ mod tests {
         let mut data = Vec::new();
         reader.read_to_end(&mut data).unwrap();
 
-        let (_, book) = parse_book(&data).unwrap();
+        let (_, book) = parse_book(&data).expect("could not parse book");
 
         let mut expected_html_reader =
             std::fs::File::open("resources/war_and_peace.rawml").unwrap();
