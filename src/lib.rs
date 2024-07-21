@@ -5,8 +5,6 @@ use nom::{
     number::complete::{be_u16, be_u8},
     IResult,
 };
-#[cfg(test)]
-use proptest_derive::Arbitrary;
 use serialization::{FDSTTable, IndxHeader, MobiHeader, PalmDocHeader, TagTable};
 use std::{collections::HashMap, str::FromStr};
 
