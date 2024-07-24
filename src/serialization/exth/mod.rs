@@ -21,6 +21,15 @@ pub struct Exth {
     pub metadata_value: HashMap<MetadataIdValue, Vec<u32>>,
 }
 
+impl Default for Exth {
+    fn default() -> Self {
+        Exth {
+            metadata_id: HashMap::new(),
+            metadata_value: HashMap::new(),
+        }
+    }
+}
+
 impl<'a, Ctx> DekuReader<'a, Ctx> for Exth {
     fn from_reader_with_ctx<R: Read>(reader: &mut Reader<R>, ctx: Ctx) -> Result<Self, DekuError>
     where

@@ -13,6 +13,10 @@ pub(crate) fn read_string<R: std::io::Read>(
     reader: &mut deku::reader::Reader<R>,
     len: usize,
 ) -> Result<String, DekuError> {
+    if len == 0 {
+        return Ok("".to_string());
+    }
+
     let mut buf = vec![0; len];
     reader.read_bytes(len, &mut buf)?;
 

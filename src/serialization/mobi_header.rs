@@ -109,6 +109,43 @@ impl<Ctx> DekuWriter<Ctx> for ExtraDataFlags {
     }
 }
 
+#[derive(Debug, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
+pub struct ExthFlags {
+    pub has_fonts: bool,
+    pub is_periodical: bool,
+}
+
+impl<'a, Ctx> DekuReader<'a, Ctx> for ExthFlags {
+    fn from_reader_with_ctx<R: Read>(reader: &mut Reader<R>, ctx: Ctx) -> Result<Self, DekuError>
+    where
+        Self: Sized,
+    {
+        let flags = u32::from_reader_with_ctx(reader, deku::ctx::Endian::Big)?;
+        let has_fonts = flags & 0b1000000000000 != 0;
+        let is_periodical = flags & 0b1000 != 0;
+
+        Ok(ExthFlags {
+            has_fonts,
+            is_periodical,
+        })
+    }
+}
+
+impl<Ctx> DekuWriter<Ctx> for ExthFlags {
+    fn to_writer<W: Write>(&self, writer: &mut Writer<W>, _ctx: Ctx) -> Result<(), DekuError> {
+        let mut flags = 0b1010000;
+        if self.has_fonts {
+            flags |= 0b1000000000000;
+        }
+        if self.is_periodical {
+            flags |= 0b1000;
+        }
+
+        flags.to_writer(writer, deku::ctx::Endian::Big)
+    }
+}
+
 #[derive(Debug, PartialEq, DekuRead, DekuWrite)]
 #[deku(id_type = "u32", ctx = "endian: deku::ctx::Endian", endian = "endian")]
 #[cfg_attr(test, derive(Arbitrary))]
@@ -131,6 +168,20 @@ pub enum CompressionType {
     HuffCdic,
 }
 
+#[derive(Debug, PartialEq, DekuRead, DekuWrite, Clone)]
+#[cfg_attr(test, derive(Arbitrary))]
+#[deku(id_type = "u32", ctx = "endian: deku::ctx::Endian", endian = "endian")]
+pub enum BookType {
+    #[deku(id = 0x2)]
+    Book,
+    #[deku(id = 0x101)]
+    NewsHierarchal,
+    #[deku(id = 0x102)]
+    NewsFlat,
+    #[deku(id = 0x103)]
+    NewsMagazine,
+}
+
 #[deku_derive(DekuRead, DekuWrite)]
 #[deku(endian = "big")]
 #[derive(Debug, PartialEq)]
@@ -142,13 +193,15 @@ pub struct MobiHeader {
     pub text_length: u32,
     pub last_text_record: u16,
     pub text_record_size: u16,
-    pub encryption_type: u16, // todo
+    #[deku(temp, temp_value = "0")]
+    encryption_type: u16,
     #[deku(temp, temp_value = "[0x00; 2]")]
     _unused1: [u8; 2],
-    pub ident: [u8; 4], // todo
+    #[deku(temp, temp_value = "*b\"MOBI\"")]
+    ident: [u8; 4], // todo
     #[deku(temp, temp_value = "264")]
     header_length: u32,
-    pub book_type: u32, // todo
+    pub book_type: BookType,
     pub text_encoding: Codepage,
     pub uid: u32,          // todo
     pub file_version: u32, // todo
@@ -159,20 +212,26 @@ pub struct MobiHeader {
     #[deku(temp, temp_value = "[u32::MAX; 8]")]
     pub extra_indices: [u32; 8],
     pub first_non_text_record: u32,
-    pub title_offset: u32,           // todo: derive with deku?
-    pub title_length: u32,           // todo: derive with deku?
+    pub title_offset: u32, // todo: derive with deku?
+    #[deku(temp, temp_value = "title.len() as u32")]
+    pub title_length: u32,
     pub language_code: LanguageCode, // language_code
-    pub in_lang: u32,                // todo
-    pub out_lang: u32,               // todo
-    pub min_version: u32,            // todo
+    #[deku(temp, temp_value = "0")]
+    in_lang: u32,
+    #[deku(temp, temp_value = "0")]
+    out_lang: u32,
+    #[deku(temp, temp_value = "*file_version")]
+    min_version: u32,
     pub first_resource_record: u32,
+    #[deku(temp, temp_value = "0")]
     huff_first_record: u32,
+    #[deku(temp, temp_value = "0")]
     huff_count: u32,
     #[deku(temp, temp_value = "[u32::MAX; 4]")]
     huff_table_offset: [u32; 4],
     #[deku(temp, temp_value = "[u32::MAX; 4]")]
     huff_table_length: [u32; 4],
-    pub exth_flags: u32, // todo
+    pub exth_flags: ExthFlags, // todo
     #[deku(temp, temp_value = "[0x00; 8]")]
     _unused2: [u8; 8],
     #[deku(temp, temp_value = "u32::MAX")]

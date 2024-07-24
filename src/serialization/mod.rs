@@ -1,3 +1,4 @@
+mod book;
 mod exth;
 mod fdst_table;
 mod indx_header;
