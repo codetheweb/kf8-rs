@@ -112,6 +112,7 @@ impl<Ctx> DekuWriter<Ctx> for ExtraDataFlags {
 #[derive(Debug, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct ExthFlags {
+    pub has_exth: bool,
     pub has_fonts: bool,
     pub is_periodical: bool,
 }
@@ -122,10 +123,12 @@ impl<'a, Ctx> DekuReader<'a, Ctx> for ExthFlags {
         Self: Sized,
     {
         let flags = u32::from_reader_with_ctx(reader, deku::ctx::Endian::Big)?;
+        let has_exth = flags & 0b1010000 != 0;
         let has_fonts = flags & 0b1000000000000 != 0;
         let is_periodical = flags & 0b1000 != 0;
 
         Ok(ExthFlags {
+            has_exth,
             has_fonts,
             is_periodical,
         })
@@ -134,7 +137,10 @@ impl<'a, Ctx> DekuReader<'a, Ctx> for ExthFlags {
 
 impl<Ctx> DekuWriter<Ctx> for ExthFlags {
     fn to_writer<W: Write>(&self, writer: &mut Writer<W>, _ctx: Ctx) -> Result<(), DekuError> {
-        let mut flags = 0b1010000;
+        let mut flags = 0;
+        if self.has_exth {
+            flags |= 0b1010000;
+        }
         if self.has_fonts {
             flags |= 0b1000000000000;
         }
@@ -227,13 +233,13 @@ pub struct MobiHeader {
     huff_first_record: u32,
     #[deku(temp, temp_value = "0")]
     huff_count: u32,
-    #[deku(temp, temp_value = "[u32::MAX; 4]")]
-    huff_table_offset: [u32; 4],
-    #[deku(temp, temp_value = "[u32::MAX; 4]")]
-    huff_table_length: [u32; 4],
+    #[deku(temp, temp_value = "[0; 4]")]
+    huff_table_offset: [u8; 4],
+    #[deku(temp, temp_value = "[0; 4]")]
+    huff_table_length: [u8; 4],
     pub exth_flags: ExthFlags, // todo
-    #[deku(temp, temp_value = "[0x00; 8]")]
-    _unused2: [u8; 8],
+    #[deku(temp, temp_value = "[0; 32]")]
+    _unused2: [u8; 32],
     #[deku(temp, temp_value = "u32::MAX")]
     _unused3: u32,
     #[deku(temp, temp_value = "u32::MAX")]
@@ -274,7 +280,9 @@ pub struct MobiHeader {
     _unused9: [u8; 4],
     #[deku(temp, temp_value = "[0x00; 4]")]
     _unused10: [u8; 4],
-    pub exth: Exth,
+    // todo: add a deku assert to relate to flags
+    // todo: how do optionals work with deku?
+    pub exth: Option<Exth>,
     #[deku(
         reader = "crate::utils::deku::read_string(deku::reader, *title_length as usize)",
         writer = "crate::utils::deku::write_string(deku::writer, title)"

@@ -12,7 +12,7 @@ use std::{collections::HashMap, str::FromStr};
 use crate::{constants::MetadataIdValue, tag_map::parse_tag_map};
 
 pub mod constants;
-mod serialization;
+pub mod serialization;
 mod tag_map;
 mod utils;
 
@@ -195,6 +195,8 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
     let cover_offset = book_header.first_resource_record as usize
         + *book_header
             .exth
+            .as_ref()
+            .unwrap()
             .metadata_value
             .get(&MetadataIdValue::CoverOffset)
             .unwrap()
@@ -204,6 +206,8 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
     let thumbnail_offset = book_header.first_resource_record as usize
         + *book_header
             .exth
+            .as_ref()
+            .unwrap()
             .metadata_value
             .get(&MetadataIdValue::ThumbOffset)
             .unwrap()

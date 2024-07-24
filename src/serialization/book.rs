@@ -18,12 +18,12 @@ const TEXT_RECORD_SIZE: usize = 4096; // todo: assert that chunks are this lengt
 
 #[derive(Debug, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
-struct Book {
-    title: String,
-    uid: u32,
-    main_language: Option<MainLanguage>,
-    sub_language: Option<SubLanguage>,
-    text: String,
+pub struct Book {
+    pub title: String,
+    pub uid: u32,
+    pub main_language: Option<MainLanguage>,
+    pub sub_language: Option<SubLanguage>,
+    pub text: String,
 }
 
 impl TryFrom<PalmDoc> for Book {
@@ -172,6 +172,7 @@ impl TryFrom<&Book> for PalmDoc {
             },
             first_resource_record: u32::MAX, // todo
             exth_flags: ExthFlags {
+                has_exth: false, // todo
                 has_fonts: false,
                 is_periodical: false,
             },
@@ -193,7 +194,7 @@ impl TryFrom<&Book> for PalmDoc {
             skel_index: skel_index as u32,
             datp_index: u32::MAX,
             guide_index: u32::MAX, // todo
-            exth: Exth::default(),
+            exth: None,            // todo
         };
         records.insert(0, mobi_header.to_bytes()?);
 

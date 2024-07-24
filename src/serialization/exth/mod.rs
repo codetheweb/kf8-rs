@@ -12,7 +12,7 @@ use proptest_derive::Arbitrary;
 mod read;
 mod write;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Exth {
     #[cfg_attr(test, proptest(filter = "|m| m.values().all(|v| v.len() > 0)"))]
