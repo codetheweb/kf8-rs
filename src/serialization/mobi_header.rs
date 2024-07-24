@@ -281,7 +281,7 @@ pub struct MobiHeader {
     #[deku(temp, temp_value = "[0x00; 4]")]
     _unused10: [u8; 4],
     // todo: add a deku assert to relate to flags
-    // todo: how do optionals work with deku?
+    #[deku(cond = "exth_flags.has_exth")]
     pub exth: Option<Exth>,
     #[deku(
         reader = "crate::utils::deku::read_string(deku::reader, *title_length as usize)",
