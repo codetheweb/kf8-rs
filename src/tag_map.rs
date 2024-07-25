@@ -4,7 +4,7 @@ use nom::{
 };
 use std::{collections::HashMap, io::Cursor};
 
-use crate::{serialization::TagTableEntry, utils::deku::read_big_endian_variable_width_value};
+use crate::{serialization::TagSectionEntry, utils::deku::read_big_endian_variable_width_value};
 
 // Decode variable width value from given bytes.
 fn get_variable_width_value(data: &[u8]) -> IResult<&[u8], u32> {
@@ -18,7 +18,7 @@ fn get_variable_width_value(data: &[u8]) -> IResult<&[u8], u32> {
 
 // Create a map of tags and values from the given byte section.
 pub fn parse_tag_map<'a>(
-    tag_table: &Vec<TagTableEntry>,
+    tag_table: &Vec<TagSectionEntry>,
     data: &'a [u8],
 ) -> IResult<&'a [u8], HashMap<u8, Vec<u32>>> {
     // let (mut remaining, _) = take(control_byte_count)(data)?;
@@ -36,7 +36,7 @@ pub fn parse_tag_map<'a>(
 
     // todo: more idiomatic
     for table_entry in tag_table {
-        let TagTableEntry {
+        let TagSectionEntry {
             tag,
             values_per_entry,
             mask,

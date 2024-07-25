@@ -1,6 +1,7 @@
 use std::{
     io::{Cursor, Read, Seek, SeekFrom, Write},
     time::{SystemTime, UNIX_EPOCH},
+    u32,
 };
 
 use deku::prelude::*;
@@ -10,8 +11,8 @@ use proptest_derive::Arbitrary;
 use crate::constants::{MainLanguage, SubLanguage};
 
 use super::{
-    exth::Exth, BookType, Codepage, CompressionType, ExthFlags, ExtraDataFlags, LanguageCode,
-    MobiHeader, PalmDoc,
+    exth::Exth, BookType, Codepage, CompressionType, ExthFlags, ExtraDataFlags, FDSTTable,
+    LanguageCode, MobiHeader, PalmDoc,
 };
 
 const TEXT_RECORD_SIZE: usize = 4096; // todo: assert that chunks are this length?
@@ -114,6 +115,23 @@ fn create_text_record(text: &mut Cursor<&[u8]>) -> (Vec<u8>, Vec<u8>) {
     (data, overlap)
 }
 
+const FLIS: &[u8; 36] = b"FLIS\0\0\0\x08\0\x41\0\0\0\0\0\0\xff\xff\xff\xff\0\x01\0\x03\0\0\0\x03\0\0\0\x01\xff\xff\xff\xff";
+
+fn create_fcis_record(text_length: usize) -> Vec<u8> {
+    let mut fcis: Vec<u8> = vec![
+        0x46, 0x43, 0x49, 0x53, // 'FCIS'
+        0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
+        0x00,
+    ];
+    fcis.extend_from_slice(&text_length.to_be_bytes());
+    fcis.extend_from_slice(&[
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x28, 0x00, 0x00, 0x00, 0x08, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+    ]);
+
+    fcis
+}
+
 impl TryFrom<&Book> for PalmDoc {
     type Error = DekuError;
 
@@ -127,8 +145,8 @@ impl TryFrom<&Book> for PalmDoc {
 
         let mut records = vec![];
 
+        // Text records
         let mut text_cursor = Cursor::new(book.text.as_bytes());
-
         while text_cursor.position() < text_cursor.get_ref().len() as u64 {
             let (record, mut overlap) = create_text_record(&mut text_cursor);
             // todo: make compression configurable?
@@ -149,11 +167,34 @@ impl TryFrom<&Book> for PalmDoc {
             first_non_text_record += 1;
         }
 
-        let chunk_index = records.len();
-        // todo: add chunks to records
-        let skel_index = records.len(); // todo: rename
-                                        // todo: add skel to records
+        // Metadata records
+        let chunk_index = u32::MAX; //records.len();
+                                    // todo: add chunks to records
+        let skel_index = u32::MAX; //records.len(); // todo: rename
+                                   // todo: add skel to records
 
+        let guide_index = u32::MAX; // todo
+        let ncx_index = u32::MAX; // todo
+
+        // Resource records
+        // todo
+
+        // FDST
+        let fdst_record = records.len();
+        records.push(FDSTTable { entries: vec![] }.to_bytes().unwrap());
+
+        // FCIS
+        let fcis_record = records.len();
+        records.push(create_fcis_record(book.text.len()));
+
+        // FLIS
+        let flis_record = records.len();
+        records.push(FLIS.to_vec());
+
+        // EOF
+        records.push(b"\xe9\x8e\r\n".to_vec());
+
+        // todo: consistent terms between _record and _index
         let mobi_header = MobiHeader {
             title: book.title.clone(),
             compression_type: CompressionType::PalmDoc,
@@ -176,11 +217,11 @@ impl TryFrom<&Book> for PalmDoc {
                 has_fonts: false,
                 is_periodical: false,
             },
-            fdst_record: records.len() as u32,
-            fdst_count: records.len() as u32,
-            fcis_record: records.len() as u32,
+            fdst_record: fdst_record as u32,
+            fdst_count: fdst_record as u32,
+            fcis_record: fcis_record as u32,
             fcis_count: 1,
-            flis_record: records.len() as u32,
+            flis_record: flis_record as u32,
             flis_count: 1,
             srcs_record: u32::MAX,
             srcs_count: 0,
@@ -189,12 +230,12 @@ impl TryFrom<&Book> for PalmDoc {
                 has_tbs: false,
                 uncrossable_breaks: false,
             },
-            ncx_index: u32::MAX, // todo
+            ncx_index,
             chunk_index: chunk_index as u32,
             skel_index: skel_index as u32,
             datp_index: u32::MAX,
-            guide_index: u32::MAX, // todo
-            exth: None,            // todo
+            guide_index,
+            exth: None, // todo
         };
         records.insert(0, mobi_header.to_bytes()?);
 
