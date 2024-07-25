@@ -6,7 +6,9 @@ use nom::{
     number::complete::{be_u16, be_u8},
     IResult,
 };
-use serialization::{FDSTTable, IndxHeader, MobiHeader, PalmDoc, TagTable};
+use serialization::{
+    ChunkIndex, FDSTTable, IndxHeader, MobiHeader, PalmDoc, TagTableDefinition, TagTableRow,
+};
 use std::{collections::HashMap, str::FromStr};
 
 use crate::{constants::MetadataIdValue, tag_map::parse_tag_map};
@@ -70,7 +72,7 @@ pub struct Resource {
 pub struct MobiBook {
     palmdoc: PalmDoc,
     pub book_header: MobiHeader,
-    pub fragment_table: Vec<FragmentTableEntry>,
+    pub fragment_table: Vec<ChunkIndex>,
     content: String,
     pub parts: Vec<MobiBookPart>,
     pub resources: Vec<Resource>,
@@ -149,14 +151,14 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
                 filename = format!("part{}.xhtml", fragment_entry.file_number);
             }
 
-            let fragment_text = &text[base_ptr..base_ptr + fragment_entry.len as usize];
+            let fragment_text = &text[base_ptr..base_ptr + fragment_entry.length as usize];
 
             fragments.push(MobiBookFragment {
                 index: fragment_i,
                 content: fragment_text.to_vec(),
             });
 
-            base_ptr += fragment_entry.len as usize;
+            base_ptr += fragment_entry.length as usize;
             fragment_i += 1;
         }
 
@@ -318,7 +320,8 @@ fn parse_index_data<'a>(
     let (_, indx_header) = parse_indx_header(indx_section_data).unwrap();
 
     let (_, tag_section) =
-        TagTable::from_bytes((&indx_section_data[indx_header.len as usize..], 0)).unwrap();
+        TagTableDefinition::from_bytes((&indx_section_data[indx_header.len as usize..], 0))
+            .unwrap();
 
     let mut index_table = vec![];
 
@@ -333,7 +336,7 @@ fn parse_index_data<'a>(
             let (remaining, segment) =
                 parse_indx_text_segment(&data[*beginning_offset as usize..])?;
 
-            let (_, tag_map) = parse_tag_map(&tag_section.tags, remaining).unwrap();
+            let (_, tag_map) = parse_tag_map(&tag_section.tag_definitions, remaining).unwrap();
 
             index_table.push(IndexTableEntry {
                 file_number: i,
@@ -378,17 +381,15 @@ pub struct FragmentTableEntry {
     len: u32,
 }
 
-fn index_table_to_fragment_table(table_entries: &[IndexTableEntry]) -> Vec<FragmentTableEntry> {
+fn index_table_to_fragment_table(table_entries: &[IndexTableEntry]) -> Vec<ChunkIndex> {
     table_entries
         .iter()
-        .map(|entry| FragmentTableEntry {
-            insert_position: u32::from_str(&entry.label).unwrap(),
-            // todo
-            id_text: "".to_string(),
-            file_number: entry.tag_map.get(&3).unwrap()[0],
-            seq_number: entry.tag_map.get(&4).unwrap()[0],
-            start_pos: entry.tag_map.get(&6).unwrap()[0],
-            len: entry.tag_map.get(&6).unwrap()[1],
+        .map(|entry| {
+            ChunkIndex::try_from(TagTableRow {
+                text: Some(entry.label.clone()),
+                tag_map: entry.tag_map.clone(),
+            })
+            .unwrap()
         })
         .collect()
 }
