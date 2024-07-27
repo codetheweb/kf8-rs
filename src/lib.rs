@@ -1,18 +1,12 @@
 use deku::prelude::*;
-use nom::{
-    bytes::complete::take,
-    error::Error,
-    multi::count,
-    number::complete::{be_u16, be_u8},
-    IResult,
-};
+use nom::{bytes::complete::take, error::Error, IResult};
 use serialization::{
-    ChunkIndex, FDSTTable, IndexRecord, IndxHeader, MobiHeader, PalmDoc, SkeletonIndex,
-    TagTableDefinition, TagTableRow,
+    ChunkIndexRow, FDSTTable, IndexRecord, IndxHeader, MobiHeader, PalmDoc, SkeletonIndexRow,
+    TagTableDefinition,
 };
-use std::{collections::HashMap, io::Cursor, str::FromStr};
+use std::io::Cursor;
 
-use crate::{constants::MetadataIdValue, tag_map::parse_tag_map};
+use crate::constants::MetadataIdValue;
 
 pub mod constants;
 pub mod serialization;
@@ -73,7 +67,7 @@ pub struct Resource {
 pub struct MobiBook {
     palmdoc: PalmDoc,
     pub book_header: MobiHeader,
-    pub fragment_table: Vec<ChunkIndex>,
+    pub fragment_table: Vec<ChunkIndexRow>,
     content: String,
     pub parts: Vec<MobiBookPart>,
     pub resources: Vec<Resource>,
@@ -326,19 +320,19 @@ fn parse_index_data<'a>(palmdoc: &'a PalmDoc, section_i: usize) -> IResult<&'a [
     todo!()
 }
 
-fn index_table_to_skeleton_table(index_record: &IndexRecord) -> Vec<SkeletonIndex> {
+fn index_table_to_skeleton_table(index_record: &IndexRecord) -> Vec<SkeletonIndexRow> {
     index_record
         .rows
         .iter()
-        .map(|row| SkeletonIndex::try_from(row).unwrap())
+        .map(|row| SkeletonIndexRow::try_from(row).unwrap())
         .collect()
 }
 
-fn index_table_to_chunk_table(index_record: &IndexRecord) -> Vec<ChunkIndex> {
+fn index_table_to_chunk_table(index_record: &IndexRecord) -> Vec<ChunkIndexRow> {
     index_record
         .rows
         .iter()
-        .map(|row| ChunkIndex::try_from(row).unwrap())
+        .map(|row| ChunkIndexRow::try_from(row).unwrap())
         .collect()
 }
 
