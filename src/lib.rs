@@ -7,9 +7,10 @@ use nom::{
     IResult,
 };
 use serialization::{
-    ChunkIndex, FDSTTable, IndxHeader, MobiHeader, PalmDoc, TagTableDefinition, TagTableRow,
+    ChunkIndex, FDSTTable, IndexRecord, IndxHeader, MobiHeader, PalmDoc, SkeletonIndex,
+    TagTableDefinition, TagTableRow,
 };
-use std::{collections::HashMap, str::FromStr};
+use std::{collections::HashMap, io::Cursor, str::FromStr};
 
 use crate::{constants::MetadataIdValue, tag_map::parse_tag_map};
 
@@ -120,13 +121,11 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
 
     let text = *flows.first().unwrap();
 
-    let (_, skeleton_table) =
-        parse_index_data(original_input, &palmdoc, book_header.skel_index as usize).unwrap();
+    let (_, skeleton_table) = parse_index_data(&palmdoc, book_header.skel_index as usize).unwrap();
 
-    let (_, fragment_table) =
-        parse_index_data(original_input, &palmdoc, book_header.chunk_index as usize).unwrap();
+    let (_, fragment_table) = parse_index_data(&palmdoc, book_header.chunk_index as usize).unwrap();
 
-    let fragment_table = index_table_to_fragment_table(&fragment_table);
+    let fragment_table = index_table_to_chunk_table(&fragment_table);
 
     let mut parts = vec![];
 
@@ -135,7 +134,7 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
         .iter()
         .enumerate()
     {
-        let mut base_ptr = skeleton_entry.start_offset + skeleton_entry.len;
+        let mut base_ptr = (skeleton_entry.start_offset + skeleton_entry.length) as usize;
 
         let mut fragments: Vec<MobiBookFragment> = vec![];
 
@@ -144,7 +143,7 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
 
         // todo: zip?
         let mut filename: String = "".to_string();
-        for i in 0..skeleton_entry.fragment_table_record_count {
+        for i in 0..skeleton_entry.chunk_count {
             let fragment_entry = fragment_table.get(fragment_i).unwrap();
 
             if i == 0 {
@@ -162,16 +161,16 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
             fragment_i += 1;
         }
 
-        let skeleton_head = &text[skeleton_entry.start_offset..split_skeleton_at];
-        let skeleton_tail =
-            &text[split_skeleton_at..skeleton_entry.start_offset + skeleton_entry.len];
+        let skeleton_head = &text[skeleton_entry.start_offset as usize..split_skeleton_at];
+        let skeleton_tail = &text
+            [split_skeleton_at..(skeleton_entry.start_offset + skeleton_entry.length) as usize];
 
         parts.push(MobiBookPart {
             filename,
             skeleton_head: skeleton_head.to_vec(),
             fragments,
             skeleton_tail: skeleton_tail.to_vec(),
-            start_offset: skeleton_entry.start_offset,
+            start_offset: skeleton_entry.start_offset as usize,
             end_offset: base_ptr,
         });
     }
@@ -303,18 +302,7 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
     ))
 }
 
-#[derive(Debug)]
-struct IndexTableEntry {
-    file_number: usize,
-    label: String,
-    tag_map: HashMap<u8, Vec<u32>>,
-}
-
-fn parse_index_data<'a>(
-    original_input: &'a [u8],
-    palmdoc: &'a PalmDoc,
-    section_i: usize,
-) -> IResult<&'a [u8], Vec<IndexTableEntry>> {
+fn parse_index_data<'a>(palmdoc: &'a PalmDoc, section_i: usize) -> IResult<&'a [u8], IndexRecord> {
     // Parse INDX header
     let indx_section_data = palmdoc.records[section_i].as_slice();
     let (_, indx_header) = parse_indx_header(indx_section_data).unwrap();
@@ -323,83 +311,35 @@ fn parse_index_data<'a>(
         TagTableDefinition::from_bytes((&indx_section_data[indx_header.len as usize..], 0))
             .unwrap();
 
-    let mut index_table = vec![];
-
     for i in (section_i + 1)..(section_i + 1 + indx_header.num_entries as usize) {
         let data = palmdoc.records[i].as_slice();
-        let (_, header) = parse_indx_header(data).unwrap();
 
-        let (_, indx_offsets) =
-            count(be_u16, header.num_entries as usize)(&data[header.block_offset as usize + 4..])?;
+        let mut cursor = Cursor::new(&data);
+        let mut reader = Reader::new(&mut cursor);
+        let index_record =
+            IndexRecord::from_reader_with_ctx(&mut reader, &tag_section.tag_definitions).unwrap();
 
-        for (i, beginning_offset) in indx_offsets.iter().enumerate() {
-            let (remaining, segment) =
-                parse_indx_text_segment(&data[*beginning_offset as usize..])?;
-
-            let (_, tag_map) = parse_tag_map(&tag_section.tag_definitions, remaining).unwrap();
-
-            index_table.push(IndexTableEntry {
-                file_number: i,
-                label: segment,
-                tag_map,
-            });
-        }
+        // todo: handle multiple records
+        return Ok((&[], index_record));
     }
 
-    Ok((&[], index_table))
+    todo!()
 }
 
-#[derive(Debug)]
-struct SkeletonTableEntry {
-    file_number: usize,
-    label: String,
-    fragment_table_record_count: usize,
-    start_offset: usize,
-    len: usize,
-}
-
-fn index_table_to_skeleton_table(table_entries: &[IndexTableEntry]) -> Vec<SkeletonTableEntry> {
-    table_entries
+fn index_table_to_skeleton_table(index_record: &IndexRecord) -> Vec<SkeletonIndex> {
+    index_record
+        .rows
         .iter()
-        .map(|entry| SkeletonTableEntry {
-            file_number: entry.file_number,
-            label: entry.label.clone(),
-            fragment_table_record_count: entry.tag_map.get(&1).unwrap()[0] as usize,
-            start_offset: entry.tag_map.get(&6).unwrap()[0] as usize,
-            len: entry.tag_map.get(&6).unwrap()[1] as usize,
-        })
+        .map(|row| SkeletonIndex::try_from(row).unwrap())
         .collect()
 }
 
-#[derive(Debug)]
-pub struct FragmentTableEntry {
-    pub insert_position: u32,
-    id_text: String,
-    file_number: u32,
-    seq_number: u32,
-    start_pos: u32,
-    len: u32,
-}
-
-fn index_table_to_fragment_table(table_entries: &[IndexTableEntry]) -> Vec<ChunkIndex> {
-    table_entries
+fn index_table_to_chunk_table(index_record: &IndexRecord) -> Vec<ChunkIndex> {
+    index_record
+        .rows
         .iter()
-        .map(|entry| {
-            ChunkIndex::try_from(TagTableRow {
-                text: Some(entry.label.clone()),
-                tag_map: entry.tag_map.clone(),
-            })
-            .unwrap()
-        })
+        .map(|row| ChunkIndex::try_from(row).unwrap())
         .collect()
-}
-
-fn parse_indx_text_segment(input: &[u8]) -> IResult<&[u8], String> {
-    let (input, len) = be_u8(input)?;
-    let (input, segment) = take(len as usize)(input)?;
-
-    // todo: remove unwrap
-    Ok((input, String::from_utf8(segment.to_vec()).unwrap()))
 }
 
 fn parse_indx_header(input: &[u8]) -> IResult<&[u8], IndxHeader> {

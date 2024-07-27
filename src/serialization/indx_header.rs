@@ -18,8 +18,6 @@ pub struct IndxHeader {
     pub num_entries: u32,
     #[deku(temp, temp_value = "[0xff; 8]")]
     _unused2: [u8; 8],
-    #[deku(temp, temp_value = "[0x00; 156]")]
-    _unused3: [u8; 156],
 }
 
 #[cfg(test)]
