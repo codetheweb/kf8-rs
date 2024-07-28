@@ -4,14 +4,14 @@ use deku::prelude::*;
 
 use crate::serialization::{IndxHeader, TagDefinition};
 
-use super::types::TagTableRow;
+use super::types::{IndexRow, TagTableRow, TagTableRowParseError};
 
-pub struct IndexRecord {
+pub struct IndexDataRecord {
     header: IndxHeader,
     pub rows: Vec<TagTableRow>,
 }
 
-impl<'a> DekuReader<'a, &Vec<TagDefinition>> for IndexRecord {
+impl<'a> DekuReader<'a, &Vec<TagDefinition>> for IndexDataRecord {
     fn from_reader_with_ctx<R: Read>(
         reader: &mut Reader<R>,
         tag_definitions: &Vec<TagDefinition>,
@@ -66,6 +66,12 @@ impl<'a> DekuReader<'a, &Vec<TagDefinition>> for IndexRecord {
             rows.push(row);
         }
 
-        Ok(IndexRecord { header, rows })
+        Ok(IndexDataRecord { header, rows })
+    }
+}
+
+impl IndexDataRecord {
+    pub fn parse_as<'a, T: IndexRow<'a>>(&'a self) -> Result<Vec<T>, TagTableRowParseError> {
+        self.rows.iter().map(|row| T::try_from(&row)).collect()
     }
 }

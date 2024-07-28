@@ -1,7 +1,7 @@
 use deku::prelude::*;
 use nom::{bytes::complete::take, error::Error, IResult};
 use serialization::{
-    ChunkIndexRow, FDSTTable, IndexDefinitionRecord, IndexRecord, IndxHeader, MobiHeader, PalmDoc,
+    ChunkIndexRow, FDSTTable, IndexDataRecord, IndexDefinitionRecord, MobiHeader, PalmDoc,
     SkeletonIndexRow,
 };
 use std::io::Cursor;
@@ -119,12 +119,14 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
 
     let (_, fragment_table) = parse_index_data(&palmdoc, book_header.chunk_index as usize).unwrap();
 
-    let fragment_table = index_table_to_chunk_table(&fragment_table);
+    let fragment_table = fragment_table.parse_as::<ChunkIndexRow>().unwrap();
 
     let mut parts = vec![];
 
     let mut fragment_i = 0;
-    for (i, skeleton_entry) in index_table_to_skeleton_table(&skeleton_table)
+    for (i, skeleton_entry) in skeleton_table
+        .parse_as::<SkeletonIndexRow>()
+        .unwrap()
         .iter()
         .enumerate()
     {
@@ -296,7 +298,10 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
     ))
 }
 
-fn parse_index_data<'a>(palmdoc: &'a PalmDoc, section_i: usize) -> IResult<&'a [u8], IndexRecord> {
+fn parse_index_data<'a>(
+    palmdoc: &'a PalmDoc,
+    section_i: usize,
+) -> IResult<&'a [u8], IndexDataRecord> {
     // Parse INDX header
     let indx_section_data = palmdoc.records[section_i].as_slice();
     let (_, index_definition_record) =
@@ -308,7 +313,7 @@ fn parse_index_data<'a>(palmdoc: &'a PalmDoc, section_i: usize) -> IResult<&'a [
 
         let mut cursor = Cursor::new(&data);
         let mut reader = Reader::new(&mut cursor);
-        let index_record = IndexRecord::from_reader_with_ctx(
+        let index_record = IndexDataRecord::from_reader_with_ctx(
             &mut reader,
             &index_definition_record.definition.tag_definitions,
         )
@@ -319,28 +324,6 @@ fn parse_index_data<'a>(palmdoc: &'a PalmDoc, section_i: usize) -> IResult<&'a [
     }
 
     todo!()
-}
-
-fn index_table_to_skeleton_table(index_record: &IndexRecord) -> Vec<SkeletonIndexRow> {
-    index_record
-        .rows
-        .iter()
-        .map(|row| SkeletonIndexRow::try_from(row).unwrap())
-        .collect()
-}
-
-fn index_table_to_chunk_table(index_record: &IndexRecord) -> Vec<ChunkIndexRow> {
-    index_record
-        .rows
-        .iter()
-        .map(|row| ChunkIndexRow::try_from(row).unwrap())
-        .collect()
-}
-
-fn parse_indx_header(input: &[u8]) -> IResult<&[u8], IndxHeader> {
-    let ((input, _), header) = IndxHeader::from_bytes((input, 0)).expect("could not parse header");
-
-    Ok((input, header))
 }
 
 #[cfg(test)]
