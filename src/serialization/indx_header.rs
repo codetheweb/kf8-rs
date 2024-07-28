@@ -2,12 +2,16 @@ use deku::prelude::*;
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
+const INDX_HEADER_SIZE: usize = 36;
+
 #[deku_derive(DekuRead, DekuWrite)]
 #[deku(endian = "big", magic = b"INDX")]
 #[derive(Debug, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct IndxHeader {
-    pub len: u32,
+    // Something is really slow for large values of len
+    #[cfg_attr(test, proptest(strategy = "INDX_HEADER_SIZE as u32..=10_000"))]
+    pub len: u32, // todo: populate with length
     #[deku(temp, temp_value = "[0; 4]")]
     _unused0: [u8; 4],
     #[deku(temp, temp_value = "1")]
@@ -18,6 +22,12 @@ pub struct IndxHeader {
     pub num_entries: u32,
     #[deku(temp, temp_value = "[0xff; 8]")]
     _unused2: [u8; 8],
+    #[deku(
+        temp,
+        count = "*len as usize - INDX_HEADER_SIZE",
+        temp_value = "vec![0; *len as usize - INDX_HEADER_SIZE]"
+    )]
+    _unused3: Vec<u8>,
 }
 
 #[cfg(test)]

@@ -1,8 +1,8 @@
 use deku::prelude::*;
 use nom::{bytes::complete::take, error::Error, IResult};
 use serialization::{
-    ChunkIndexRow, FDSTTable, IndexRecord, IndxHeader, MobiHeader, PalmDoc, SkeletonIndexRow,
-    TagTableDefinition,
+    ChunkIndexRow, FDSTTable, IndexDefinitionRecord, IndexRecord, IndxHeader, MobiHeader, PalmDoc,
+    SkeletonIndexRow,
 };
 use std::io::Cursor;
 
@@ -299,19 +299,20 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
 fn parse_index_data<'a>(palmdoc: &'a PalmDoc, section_i: usize) -> IResult<&'a [u8], IndexRecord> {
     // Parse INDX header
     let indx_section_data = palmdoc.records[section_i].as_slice();
-    let (_, indx_header) = parse_indx_header(indx_section_data).unwrap();
+    let (_, index_definition_record) =
+        IndexDefinitionRecord::from_bytes((indx_section_data, 0)).unwrap();
 
-    let (_, tag_section) =
-        TagTableDefinition::from_bytes((&indx_section_data[indx_header.len as usize..], 0))
-            .unwrap();
-
-    for i in (section_i + 1)..(section_i + 1 + indx_header.num_entries as usize) {
+    for i in (section_i + 1)..(section_i + 1 + index_definition_record.header.num_entries as usize)
+    {
         let data = palmdoc.records[i].as_slice();
 
         let mut cursor = Cursor::new(&data);
         let mut reader = Reader::new(&mut cursor);
-        let index_record =
-            IndexRecord::from_reader_with_ctx(&mut reader, &tag_section.tag_definitions).unwrap();
+        let index_record = IndexRecord::from_reader_with_ctx(
+            &mut reader,
+            &index_definition_record.definition.tag_definitions,
+        )
+        .unwrap();
 
         // todo: handle multiple records
         return Ok((&[], index_record));
