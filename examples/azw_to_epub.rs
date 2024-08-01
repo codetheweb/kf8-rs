@@ -263,43 +263,43 @@ fn process(args: Args) -> Result<()> {
     builder.set_title(&book.book_header.title);
 
     // Metadata
-    if let Some(ref metadata) = book.book_header.standard_metadata {
-        if let Some(creators) = metadata.get(&MetadataId::Creator) {
-            for creator in creators {
-                builder.add_author(creator);
-            }
-        }
+    // if let Some(ref metadata) = book.book_header.standard_metadata {
+    //     if let Some(creators) = metadata.get(&MetadataId::Creator) {
+    //         for creator in creators {
+    //             builder.add_author(creator);
+    //         }
+    //     }
 
-        if let Some(subjects) = metadata.get(&MetadataId::Subject) {
-            builder.set_subjects(subjects.clone());
-        }
+    //     if let Some(subjects) = metadata.get(&MetadataId::Subject) {
+    //         builder.set_subjects(subjects.clone());
+    //     }
 
-        if let Some(descriptions) = metadata.get(&MetadataId::Description) {
-            for description in descriptions {
-                builder.add_description(description);
-            }
-        }
+    //     if let Some(descriptions) = metadata.get(&MetadataId::Description) {
+    //         for description in descriptions {
+    //             builder.add_description(description);
+    //         }
+    //     }
 
-        if let Some(published) = metadata.get(&MetadataId::Published) {
-            builder.set_publication_date(
-                DateTime::parse_from_rfc3339(published.first().unwrap())
-                    .unwrap()
-                    .into(),
-            );
-        }
+    //     if let Some(published) = metadata.get(&MetadataId::Published) {
+    //         builder.set_publication_date(
+    //             DateTime::parse_from_rfc3339(published.first().unwrap())
+    //                 .unwrap()
+    //                 .into(),
+    //         );
+    //     }
 
-        if let Some(contributors) = metadata.get(&MetadataId::Contributor) {
-            // todo: currently unsupported by epub library
-        }
+    //     if let Some(contributors) = metadata.get(&MetadataId::Contributor) {
+    //         // todo: currently unsupported by epub library
+    //     }
 
-        if let Some(source) = metadata.get(&MetadataId::Source) {
-            // todo: currently unsupported by epub library
-        }
+    //     if let Some(source) = metadata.get(&MetadataId::Source) {
+    //         // todo: currently unsupported by epub library
+    //     }
 
-        if let Some(publishers) = metadata.get(&MetadataId::Publisher) {
-            // todo: currently unsupported by epub library
-        }
-    }
+    //     if let Some(publishers) = metadata.get(&MetadataId::Publisher) {
+    //         // todo: currently unsupported by epub library
+    //     }
+    // }
 
     if let Some(language_tag) = book.book_header.get_bcp47_language_tag() {
         builder.set_lang(language_tag);

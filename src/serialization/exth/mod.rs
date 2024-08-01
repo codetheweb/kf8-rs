@@ -7,6 +7,8 @@ use std::{
 use cookie_factory::gen;
 use deku::{reader::Reader, writer::Writer, DekuError, DekuReader, DekuWriter};
 #[cfg(test)]
+use proptest::prelude::*;
+#[cfg(test)]
 use proptest_derive::Arbitrary;
 
 mod read;
@@ -15,9 +17,21 @@ mod write;
 #[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Exth {
-    #[cfg_attr(test, proptest(filter = "|m| m.values().all(|v| v.len() > 0)"))]
+    // Manually specifying strategies so that each Vec in the hashmap has at least one element.
+    // 32 and 64 are fairly arbitrary.
+    #[cfg_attr(
+        test,
+        proptest(
+            strategy = "proptest::collection::hash_map(any::<MetadataId>(), proptest::collection::vec(\".*\", 1..32), 1..64)"
+        )
+    )]
     pub metadata_id: HashMap<MetadataId, Vec<String>>,
-    #[cfg_attr(test, proptest(filter = "|m| m.values().all(|v| v.len() > 0)"))]
+    #[cfg_attr(
+        test,
+        proptest(
+            strategy = "proptest::collection::hash_map(any::<MetadataIdValue>(), proptest::collection::vec(0..u32::MAX, 1..32), 1..64)"
+        )
+    )]
     pub metadata_value: HashMap<MetadataIdValue, Vec<u32>>,
 }
 

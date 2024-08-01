@@ -96,7 +96,7 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
         let section_data = &section_data
             [..section_data.len() - book_header.sizeof_trailing_section_entries(section_data)];
 
-        let decompressed = palmdoc_compression::calibre::decompress(section_data);
+        let decompressed = palmdoc_compression::decompress(section_data).unwrap();
 
         raw_ml.extend_from_slice(&decompressed);
     }
@@ -334,8 +334,6 @@ mod tests {
 
     #[test]
     fn extract_raw_html() {
-        // todo
-        env_logger::init();
         let mut reader = std::fs::File::open("resources/war_and_peace.azw3").unwrap();
         let mut data = Vec::new();
         reader.read_to_end(&mut data).unwrap();

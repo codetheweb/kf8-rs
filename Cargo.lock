@@ -797,9 +797,10 @@ checksum = "3fdb12b2476b595f9358c5161aa467c2438859caa136dec86c26fdd2efe17b92"
 [[package]]
 name = "palmdoc-compression"
 version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7ddcb9624081a9895cddd1ad38c6bf0fe5fa8077ebe2798ed7fc7c9f13e779e4"
 dependencies = [
  "cc",
- "libc",
  "thiserror",
 ]
 

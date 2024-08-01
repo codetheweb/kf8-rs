@@ -192,6 +192,10 @@ pub enum BookType {
 #[deku(endian = "big")]
 #[derive(Debug, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
+#[cfg_attr(
+    test,
+    proptest(filter = "|header| header.exth_flags.has_exth == header.exth.is_some()")
+)]
 pub struct MobiHeader {
     pub compression_type: CompressionType,
     #[deku(temp, temp_value = "[0x00; 2]")]
@@ -349,7 +353,7 @@ mod tests {
 
     proptest! {
         #[test]
-        fn test_roundtrip(header in any::<MobiHeader>()) {
+        fn test_mobi_header_roundtrip(header in any::<MobiHeader>()) {
           let serialized = header.to_bytes().unwrap();
 
           let ((remaining, _), parsed) = MobiHeader::from_bytes((&serialized, 0)).expect("could not parse");
