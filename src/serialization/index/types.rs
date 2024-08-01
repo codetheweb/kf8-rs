@@ -132,33 +132,50 @@ mod tests {
             })
     }
 
+    fn arbitrary_row(
+        definitions: impl Strategy<Value = Vec<TagDefinition>> + Clone,
+    ) -> impl Strategy<Value = TagTableRow> {
+        let definitions = definitions.prop_map(|definitions| {
+            definitions
+                .iter()
+                // Remove end flag definition
+                .filter(|d| d.tag != 0)
+                .cloned()
+                .collect::<Vec<TagDefinition>>()
+        });
+
+        // This is a little weird (contiguous array) because proptest doesn't support Vec<impl Strategy> -> Strategy<Vec> yet
+        let values = definitions.clone().prop_flat_map(|definitions| {
+            let total_num_values = definitions
+                .iter()
+                .map(|d| d.values_per_entry as usize)
+                .sum::<usize>();
+
+            proptest::collection::vec(0u32..=u32::MAX, total_num_values)
+        });
+
+        let maps = (definitions, values).prop_map(|(definitions, mut values)| {
+            let mut tag_map = HashMap::new();
+            for definition in definitions {
+                let v = values
+                    .drain(0..definition.values_per_entry as usize)
+                    .collect();
+                tag_map.insert(definition.tag, v);
+            }
+
+            tag_map
+        });
+
+        ("\\PC*", maps).prop_map(|(text, tag_map)| TagTableRow { text, tag_map })
+    }
+
     fn arbitrary_definition_and_row() -> impl Strategy<Value = (Vec<TagDefinition>, TagTableRow)> {
-        (arbitrary_definitions(1), "\\PC*")
-            .prop_flat_map(|(definitions, text)| {
-                let definition = &definitions[0];
-                let tag_map = proptest::collection::hash_map(
-                    Just(definition.tag),
-                    proptest::collection::vec(
-                        0u32..=u32::MAX,
-                        definition.values_per_entry as usize,
-                    ),
-                    1,
-                );
+        // todo: not one
+        arbitrary_definitions(1).prop_flat_map(|definitions| {
+            let row = arbitrary_row(Just(definitions.clone()));
 
-                (Just(definitions), Just(text), tag_map)
-            })
-            .prop_map(|(definitions, text, tag_map)| {
-                let mut row = TagTableRow {
-                    text,
-                    tag_map: HashMap::new(),
-                };
-
-                for (tag, values) in tag_map {
-                    row.tag_map.insert(tag, values);
-                }
-
-                (definitions, row)
-            })
+            (Just(definitions), row)
+        })
     }
 
     proptest! {
