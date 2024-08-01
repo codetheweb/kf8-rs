@@ -1,4 +1,4 @@
-use crate::serialization::TagDefinition;
+use crate::serialization::{TagDefinition, END_TAG_DEFINITION};
 
 use super::types::{IndexRow, TagTableRow, TagTableRowParseError};
 
@@ -26,6 +26,7 @@ impl<'a> IndexRow<'a> for SkeletonIndexRow {
                 mask: 12,
                 end_flag: 0,
             },
+            END_TAG_DEFINITION,
         ]
     }
 }

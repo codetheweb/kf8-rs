@@ -18,6 +18,7 @@ pub struct IndxHeader {
     _unused_header_type: u32,
     #[deku(temp, temp_value = "[0; 4]")]
     _unused1: [u8; 4],
+    #[cfg_attr(test, proptest(filter = "|x| *x >= INDX_HEADER_SIZE as u32"))]
     pub block_offset: u32,
     pub num_entries: u32,
     #[deku(temp, temp_value = "[0xff; 8]")]

@@ -18,7 +18,7 @@ fn get_variable_width_value(data: &[u8]) -> IResult<&[u8], u32> {
 
 // Create a map of tags and values from the given byte section.
 pub fn parse_tag_map<'a>(
-    tag_table: &Vec<TagDefinition>,
+    definitions: &Vec<TagDefinition>,
     data: &'a [u8],
 ) -> IResult<&'a [u8], HashMap<u8, Vec<u32>>> {
     // let (mut remaining, _) = take(control_byte_count)(data)?;
@@ -35,7 +35,7 @@ pub fn parse_tag_map<'a>(
     let mut tag_headers: Vec<SingleTagHeader> = vec![];
 
     // todo: more idiomatic
-    for table_entry in tag_table {
+    for table_entry in definitions {
         let TagDefinition {
             tag,
             values_per_entry,
@@ -48,8 +48,8 @@ pub fn parse_tag_map<'a>(
             continue;
         }
 
-        let (mut rem, value) = peek(be_u8)(remaining)?;
-        let mut value = value & *mask;
+        let (mut rem, control_byte) = peek(be_u8)(remaining)?;
+        let mut value = control_byte & *mask;
         if value != 0 {
             if value == *mask {
                 if mask.count_ones() > 1 {

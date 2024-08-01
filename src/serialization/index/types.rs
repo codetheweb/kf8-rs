@@ -1,10 +1,14 @@
 use std::{collections::HashMap, io::Read, io::Write};
 
+use cookie_factory::gen;
 use deku::prelude::*;
 use nom::{bytes::complete::take, error::ErrorKind, number::complete::be_u8, IResult};
 use thiserror::Error;
 
-use crate::{serialization::TagDefinition, tag_map::parse_tag_map};
+use crate::{
+    serialization::{serialize_tag_map, TagDefinition},
+    tag_map::parse_tag_map,
+};
 
 #[derive(Debug, PartialEq)]
 pub struct TagTableRow {
@@ -54,12 +58,18 @@ impl<'a> DekuReader<'a, (usize, &Vec<TagDefinition>)> for TagTableRow {
     }
 }
 
-impl DekuWriter<()> for TagTableRow {
-    fn to_writer<W: Write>(&self, writer: &mut Writer<W>, _: ()) -> Result<(), DekuError> {
-        let text = self.text.clone();
+impl DekuWriter<&Vec<TagDefinition>> for TagTableRow {
+    fn to_writer<W: Write>(
+        &self,
+        writer: &mut Writer<W>,
+        definitions: &Vec<TagDefinition>,
+    ) -> Result<(), DekuError> {
+        writer.write_bytes(&[self.text.len() as u8])?;
+        writer.write_bytes(self.text.as_bytes())?;
 
-        writer.write_bytes(&[text.len() as u8])?;
-        writer.write_bytes(text.as_bytes())?;
+        let mut buf = Vec::new();
+        gen(serialize_tag_map(definitions, &self.tag_map), &mut buf).unwrap();
+        writer.write_bytes(&buf)?;
 
         Ok(())
     }
@@ -77,4 +87,96 @@ pub trait IndexRow<'a>:
     TryFrom<&'a TagTableRow, Error = TagTableRowParseError> + Into<TagTableRow>
 {
     fn get_tag_definitions() -> Vec<TagDefinition>;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use crate::serialization::{END_TAG_DEFINITION, MASK_TO_BIT_SHIFTS};
+
+    use super::*;
+    use prop::sample::SizeRange;
+    use proptest::prelude::*;
+
+    fn arbitrary_definitions(
+        num_definitions: impl Into<SizeRange>,
+    ) -> impl Strategy<Value = Vec<TagDefinition>> {
+        // 0 is reserved for end flag
+        let possible_tags = (1..=u8::MAX).collect::<Vec<u8>>();
+        let tags = proptest::sample::subsequence(possible_tags.clone(), num_definitions);
+
+        tags.prop_shuffle()
+            .prop_flat_map(move |tags| {
+                let values_per_entry = proptest::collection::vec(1u8..=10u8, tags.len());
+                let mask = proptest::sample::select(
+                    MASK_TO_BIT_SHIFTS.keys().copied().collect::<Vec<u8>>(),
+                );
+
+                (Just(tags), values_per_entry, mask)
+            })
+            .prop_flat_map(move |(tags, values_per_entry, mask)| {
+                let mut definitions = Vec::new();
+                for i in 0..tags.len() {
+                    definitions.push(TagDefinition {
+                        tag: tags[i],
+                        values_per_entry: values_per_entry[i],
+                        mask,
+                        end_flag: 0,
+                    });
+                }
+
+                definitions.push(END_TAG_DEFINITION);
+
+                Just(definitions)
+            })
+    }
+
+    fn arbitrary_definition_and_row() -> impl Strategy<Value = (Vec<TagDefinition>, TagTableRow)> {
+        (arbitrary_definitions(1), "\\PC*")
+            .prop_flat_map(|(definitions, text)| {
+                let definition = &definitions[0];
+                let tag_map = proptest::collection::hash_map(
+                    Just(definition.tag),
+                    proptest::collection::vec(
+                        0u32..=u32::MAX,
+                        definition.values_per_entry as usize,
+                    ),
+                    1,
+                );
+
+                (Just(definitions), Just(text), tag_map)
+            })
+            .prop_map(|(definitions, text, tag_map)| {
+                let mut row = TagTableRow {
+                    text,
+                    tag_map: HashMap::new(),
+                };
+
+                for (tag, values) in tag_map {
+                    row.tag_map.insert(tag, values);
+                }
+
+                (definitions, row)
+            })
+    }
+
+    proptest! {
+      #[test]
+      fn test_tag_table_row_roundtrip((definitions, row) in arbitrary_definition_and_row()) {
+        env_logger::try_init();
+
+        let mut serialized = Cursor::new(Vec::new());
+        let mut writer = Writer::new(&mut serialized);
+        row.to_writer(&mut writer, &definitions).unwrap();
+        writer.finalize().unwrap();
+
+        serialized.set_position(0);
+        let len = serialized.get_ref().len();
+        let mut reader = Reader::new(&mut serialized);
+        let decoded = TagTableRow::from_reader_with_ctx(&mut reader, (len, &definitions)).unwrap();
+
+        assert_eq!(row, decoded);
+      }
+    }
 }

@@ -1,5 +1,5 @@
 use super::types::{IndexRow, TagTableRow, TagTableRowParseError};
-use crate::serialization::TagDefinition;
+use crate::serialization::{TagDefinition, END_TAG_DEFINITION};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
@@ -94,6 +94,7 @@ impl<'a> IndexRow<'a> for ChunkIndexRow {
                 mask: 8,
                 end_flag: 0,
             },
+            END_TAG_DEFINITION,
         ]
     }
 }

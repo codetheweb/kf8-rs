@@ -1,5 +1,6 @@
 use std::io::Write;
 
+use cookie_factory::SerializeFn;
 use deku::DekuError;
 
 pub(crate) fn write_string<W: Write>(
@@ -92,11 +93,7 @@ pub(crate) fn read_little_endian_variable_width_value<R: std::io::Read>(
     Ok(value)
 }
 
-pub(crate) fn write_variable_width_value<W: Write>(
-    writer: &mut deku::writer::Writer<W>,
-    value: u32,
-    endian: deku::ctx::Endian,
-) -> Result<(), DekuError> {
+pub(crate) fn serialize_variable_width_value(value: u32, endian: deku::ctx::Endian) -> Vec<u8> {
     let mut value = value;
     let mut buf = Vec::new();
 
@@ -118,6 +115,27 @@ pub(crate) fn write_variable_width_value<W: Write>(
 
     buf.reverse();
 
+    buf
+}
+
+pub(crate) fn cookie_write_variable_width_value<W: Write>(
+    value: u32,
+    endian: deku::ctx::Endian,
+) -> impl SerializeFn<W> {
+    let buf = serialize_variable_width_value(value, endian);
+
+    move |mut w| {
+        w.write_all(&buf)?;
+        Ok(w)
+    }
+}
+
+pub(crate) fn write_variable_width_value<W: Write>(
+    writer: &mut deku::writer::Writer<W>,
+    value: u32,
+    endian: deku::ctx::Endian,
+) -> Result<(), DekuError> {
+    let buf = serialize_variable_width_value(value, endian);
     writer.write_bytes(&buf)?;
     Ok(())
 }
