@@ -36,51 +36,45 @@ pub fn parse_tag_map<'a>(
 
     // todo: more idiomatic
     for table_entry in definitions {
-        let TagDefinition {
-            tag,
-            values_per_entry,
-            mask,
-            end_flag,
-        } = table_entry;
-        if *end_flag == 0x01 {
+        if table_entry.end_flag == 0x01 {
             let (r, _) = take(1usize)(remaining)?;
             remaining = r;
             continue;
         }
 
         let (mut rem, control_byte) = peek(be_u8)(remaining)?;
-        let mut value = control_byte & *mask;
+        let mut value = control_byte & table_entry.mask;
         if value != 0 {
-            if value == *mask {
-                if mask.count_ones() > 1 {
+            if value == table_entry.mask {
+                if table_entry.mask.count_ones() > 1 {
                     let (r, value) = get_variable_width_value(rem)?;
                     rem = r;
                     tag_headers.push(SingleTagHeader {
-                        tag: *tag,
+                        tag: table_entry.tag,
                         value_count: None,
                         value_bytes: Some(value),
-                        values_per_entry: *values_per_entry,
+                        values_per_entry: table_entry.values_per_entry,
                     })
                 } else {
                     tag_headers.push(SingleTagHeader {
-                        tag: *tag,
+                        tag: table_entry.tag,
                         value_count: Some(1),
                         value_bytes: None,
-                        values_per_entry: *values_per_entry,
+                        values_per_entry: table_entry.values_per_entry,
                     })
                 }
             } else {
-                let mut mask = *mask;
+                let mut mask = table_entry.mask;
                 while mask & 0x01 == 0 {
                     mask >>= 1;
                     value >>= 1;
                 }
 
                 tag_headers.push(SingleTagHeader {
-                    tag: *tag,
+                    tag: table_entry.tag,
                     value_count: value.into(),
                     value_bytes: None,
-                    values_per_entry: *values_per_entry,
+                    values_per_entry: table_entry.values_per_entry,
                 })
             }
 

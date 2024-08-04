@@ -102,34 +102,44 @@ mod tests {
     fn arbitrary_definitions(
         num_definitions: impl Into<SizeRange>,
     ) -> impl Strategy<Value = Vec<TagDefinition>> {
+        let possible_masks = MASK_TO_BIT_SHIFTS
+            .keys()
+            .filter(|m| m.count_ones() == 1)
+            .copied()
+            .collect::<Vec<u8>>();
+
         // 0 is reserved for end flag
         let possible_tags = (1..=u8::MAX).collect::<Vec<u8>>();
-        let tags = proptest::sample::subsequence(possible_tags.clone(), num_definitions);
+        let num_definitions: SizeRange = num_definitions.into();
+        let num_definitions =
+            num_definitions.start()..num_definitions.end_excl().min(possible_masks.len());
+        let tags =
+            proptest::sample::subsequence(possible_tags.clone(), num_definitions).prop_shuffle();
 
-        tags.prop_shuffle()
-            .prop_flat_map(move |tags| {
-                let values_per_entry = proptest::collection::vec(1u8..=10u8, tags.len());
-                let mask = proptest::sample::select(
-                    MASK_TO_BIT_SHIFTS.keys().copied().collect::<Vec<u8>>(),
+        tags.prop_flat_map(move |tags| {
+            let values_per_entry_power = proptest::collection::vec(0..=7u8, tags.len());
+            let masks =
+                proptest::sample::subsequence(possible_masks.clone(), tags.len()).prop_shuffle();
+
+            (Just(tags), values_per_entry_power, masks)
+        })
+        .prop_map(move |(tags, values_per_entry_power, masks)| {
+            let mut definitions = Vec::new();
+            for i in 0..tags.len() {
+                definitions.push(
+                    TagDefinition::new(
+                        tags[i],
+                        2u8.pow(values_per_entry_power[i].into()),
+                        masks[i],
+                        0,
+                    )
+                    .unwrap(),
                 );
+            }
 
-                (Just(tags), values_per_entry, mask)
-            })
-            .prop_flat_map(move |(tags, values_per_entry, mask)| {
-                let mut definitions = Vec::new();
-                for i in 0..tags.len() {
-                    definitions.push(TagDefinition {
-                        tag: tags[i],
-                        values_per_entry: values_per_entry[i],
-                        mask,
-                        end_flag: 0,
-                    });
-                }
-
-                definitions.push(END_TAG_DEFINITION);
-
-                Just(definitions)
-            })
+            definitions.push(END_TAG_DEFINITION);
+            definitions
+        })
     }
 
     fn arbitrary_row(
@@ -170,8 +180,8 @@ mod tests {
     }
 
     fn arbitrary_definition_and_row() -> impl Strategy<Value = (Vec<TagDefinition>, TagTableRow)> {
-        // todo: not one
-        arbitrary_definitions(1).prop_flat_map(|definitions| {
+        // Maximum number of definitions is limited by number of defined masks
+        arbitrary_definitions(1..=100).prop_flat_map(|definitions| {
             let row = arbitrary_row(Just(definitions.clone()));
 
             (Just(definitions), row)
@@ -179,6 +189,14 @@ mod tests {
     }
 
     proptest! {
+      #![proptest_config(ProptestConfig {
+        // todo: why does this need to be so high?
+        max_shrink_iters: 200_000,
+        // this logic is kinda tricky, so let's give it 4x the normal number of cases
+        cases: 1024,
+        .. ProptestConfig::default()
+      })]
+
       #[test]
       fn test_tag_table_row_roundtrip((definitions, row) in arbitrary_definition_and_row()) {
         env_logger::try_init();

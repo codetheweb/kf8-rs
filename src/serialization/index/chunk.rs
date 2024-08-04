@@ -70,30 +70,10 @@ impl Into<TagTableRow> for ChunkIndexRow {
 impl<'a> IndexRow<'a> for ChunkIndexRow {
     fn get_tag_definitions() -> Vec<TagDefinition> {
         vec![
-            TagDefinition {
-                tag: 2,
-                values_per_entry: 1,
-                mask: 1,
-                end_flag: 0,
-            },
-            TagDefinition {
-                tag: 3,
-                values_per_entry: 1,
-                mask: 2,
-                end_flag: 0,
-            },
-            TagDefinition {
-                tag: 4,
-                values_per_entry: 1,
-                mask: 4,
-                end_flag: 0,
-            },
-            TagDefinition {
-                tag: 6,
-                values_per_entry: 2,
-                mask: 8,
-                end_flag: 0,
-            },
+            TagDefinition::new(2, 1, 1, 0).unwrap(),
+            TagDefinition::new(3, 1, 2, 0).unwrap(),
+            TagDefinition::new(4, 1, 4, 0).unwrap(),
+            TagDefinition::new(6, 2, 8, 0).unwrap(),
             END_TAG_DEFINITION,
         ]
     }

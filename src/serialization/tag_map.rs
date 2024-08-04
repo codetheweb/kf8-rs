@@ -29,7 +29,7 @@ lazy_static! {
 }
 
 fn write_control_byte<W: Write>(
-    num_entries: usize,
+    rows: &HashMap<u8, Vec<u32>>,
     definitions: &Vec<TagDefinition>,
 ) -> impl SerializeFn<W> {
     let mut control_byte = 0;
@@ -39,9 +39,11 @@ fn write_control_byte<W: Write>(
             break;
         }
 
-        let num_entries = num_entries / definition.values_per_entry as usize;
+        let num_entries = rows.get(&definition.tag).unwrap().len();
+
+        let value_count = num_entries / definition.values_per_entry as usize;
         let shifts = MASK_TO_BIT_SHIFTS.get(&definition.mask).unwrap();
-        control_byte |= definition.mask & (num_entries << shifts) as u8;
+        control_byte |= definition.mask & (value_count << shifts) as u8;
     }
 
     be_u8(control_byte)
@@ -51,17 +53,18 @@ pub fn serialize_tag_map<'a, W: Write + 'a>(
     tag_table: &'a Vec<TagDefinition>,
     tag_map: &'a HashMap<u8, Vec<u32>>,
 ) -> impl SerializeFn<W> + 'a {
-    multi::all(tag_table.iter().map(move |definition| {
-        // todo: gross
-        let values_default = vec![];
-        let values = tag_map.get(&definition.tag).unwrap_or(&values_default);
-        let values = values.clone();
+    tuple((
+        write_control_byte(&tag_map, &tag_table),
+        multi::all(tag_table.iter().map(|definition| {
+            let values_default = vec![];
+            let values = tag_map.get(&definition.tag).unwrap_or(&values_default);
+            let values = values.clone();
 
-        tuple((
-            write_control_byte(values.len(), &tag_table),
-            multi::all(values.into_iter().map(move |value| {
-                cookie_write_variable_width_value(value, deku::ctx::Endian::Big)
-            })),
-        ))
-    }))
+            multi::all(
+                values.into_iter().map(move |value| {
+                    cookie_write_variable_width_value(value, deku::ctx::Endian::Big)
+                }),
+            )
+        })),
+    ))
 }

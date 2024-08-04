@@ -14,18 +14,8 @@ impl<'a> IndexRow<'a> for SkeletonIndexRow {
     fn get_tag_definitions() -> Vec<TagDefinition> {
         // todo: lazy static
         vec![
-            TagDefinition {
-                tag: 1,
-                values_per_entry: 1,
-                mask: 3,
-                end_flag: 0,
-            },
-            TagDefinition {
-                tag: 6,
-                values_per_entry: 2,
-                mask: 12,
-                end_flag: 0,
-            },
+            TagDefinition::new(1, 1, 3, 0).unwrap(),
+            TagDefinition::new(6, 2, 12, 0).unwrap(),
             END_TAG_DEFINITION,
         ]
     }
