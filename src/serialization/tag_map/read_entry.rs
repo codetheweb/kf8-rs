@@ -4,7 +4,9 @@ use nom::{
 };
 use std::{collections::HashMap, io::Cursor};
 
-use crate::{serialization::TagDefinition, utils::deku::read_big_endian_variable_width_value};
+use crate::utils::deku::read_big_endian_variable_width_value;
+
+use super::TagDefinition;
 
 // Decode variable width value from given bytes.
 fn get_variable_width_value(data: &[u8]) -> IResult<&[u8], u32> {
@@ -35,46 +37,46 @@ pub fn parse_tag_map<'a>(
     let mut tag_headers: Vec<SingleTagHeader> = vec![];
 
     // todo: more idiomatic
-    for table_entry in definitions {
-        if table_entry.end_flag == 0x01 {
+    for definition in definitions {
+        if definition.end_flag == 0x01 {
             let (r, _) = take(1usize)(remaining)?;
             remaining = r;
             continue;
         }
 
         let (mut rem, control_byte) = peek(be_u8)(remaining)?;
-        let mut value = control_byte & table_entry.mask;
+        let mut value = control_byte & definition.mask;
         if value != 0 {
-            if value == table_entry.mask {
-                if table_entry.mask.count_ones() > 1 {
+            if value == definition.mask {
+                if definition.mask.count_ones() > 1 {
                     let (r, value) = get_variable_width_value(rem)?;
                     rem = r;
                     tag_headers.push(SingleTagHeader {
-                        tag: table_entry.tag,
+                        tag: definition.tag,
                         value_count: None,
                         value_bytes: Some(value),
-                        values_per_entry: table_entry.values_per_entry,
+                        values_per_entry: definition.values_per_entry,
                     })
                 } else {
                     tag_headers.push(SingleTagHeader {
-                        tag: table_entry.tag,
+                        tag: definition.tag,
                         value_count: Some(1),
                         value_bytes: None,
-                        values_per_entry: table_entry.values_per_entry,
+                        values_per_entry: definition.values_per_entry,
                     })
                 }
             } else {
-                let mut mask = table_entry.mask;
+                let mut mask = definition.mask;
                 while mask & 0x01 == 0 {
                     mask >>= 1;
                     value >>= 1;
                 }
 
                 tag_headers.push(SingleTagHeader {
-                    tag: table_entry.tag,
+                    tag: definition.tag,
                     value_count: value.into(),
                     value_bytes: None,
-                    values_per_entry: table_entry.values_per_entry,
+                    values_per_entry: definition.values_per_entry,
                 })
             }
 

@@ -1,8 +1,8 @@
 use deku::prelude::*;
 use nom::{bytes::complete::take, error::Error, IResult};
 use serialization::{
-    ChunkIndexRow, FDSTTable, IndexDataRecord, IndexDefinitionRecord, MobiHeader, PalmDoc,
-    SkeletonIndexRow,
+    ChunkTagMapEntry, FDSTTable, IndexDataRecord, IndexDefinitionRecord, MobiHeader, PalmDoc,
+    SkeletonTagMapEntry,
 };
 use std::io::Cursor;
 
@@ -10,7 +10,6 @@ use crate::constants::MetadataIdValue;
 
 pub mod constants;
 pub mod serialization;
-mod tag_map;
 mod utils;
 
 #[derive(Debug, PartialEq)]
@@ -67,7 +66,7 @@ pub struct Resource {
 pub struct MobiBook {
     palmdoc: PalmDoc,
     pub book_header: MobiHeader,
-    pub fragment_table: Vec<ChunkIndexRow>,
+    pub fragment_table: Vec<ChunkTagMapEntry>,
     content: String,
     pub parts: Vec<MobiBookPart>,
     pub resources: Vec<Resource>,
@@ -119,13 +118,13 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
 
     let (_, fragment_table) = parse_index_data(&palmdoc, book_header.chunk_index as usize).unwrap();
 
-    let fragment_table = fragment_table.parse_as::<ChunkIndexRow>().unwrap();
+    let fragment_table = fragment_table.parse_as::<ChunkTagMapEntry>().unwrap();
 
     let mut parts = vec![];
 
     let mut fragment_i = 0;
     for (i, skeleton_entry) in skeleton_table
-        .parse_as::<SkeletonIndexRow>()
+        .parse_as::<SkeletonTagMapEntry>()
         .unwrap()
         .iter()
         .enumerate()

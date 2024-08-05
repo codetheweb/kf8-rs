@@ -1,4 +1,4 @@
-use crate::serialization::{IndxHeader, TagTableDefinition};
+use crate::serialization::{IndxHeader, TagMapDefinition};
 use deku::prelude::*;
 
 #[cfg(test)]
@@ -8,7 +8,7 @@ use proptest_derive::Arbitrary;
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct IndexDefinitionRecord {
     pub header: IndxHeader,
-    pub definition: TagTableDefinition,
+    pub definition: TagMapDefinition,
 }
 
 #[cfg(test)]

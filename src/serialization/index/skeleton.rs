@@ -1,19 +1,20 @@
-use crate::serialization::{TagDefinition, END_TAG_DEFINITION};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use super::types::{IndexRow, TagTableRow, TagTableRowParseError};
+use crate::serialization::tag_map::{TagDefinition, TagMapEntry, END_TAG_DEFINITION};
+
+use super::types::{IndexTagMapEntry, TagMapEntryParseError};
 
 #[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(test, derive(Arbitrary))]
-pub struct SkeletonIndexRow {
+pub struct SkeletonTagMapEntry {
     pub name: String,
     pub chunk_count: u32,
     pub start_offset: u32,
     pub length: u32,
 }
 
-impl<'a> IndexRow<'a> for SkeletonIndexRow {
+impl<'a> IndexTagMapEntry<'a> for SkeletonTagMapEntry {
     fn get_tag_definitions() -> Vec<TagDefinition> {
         // todo: lazy static
         vec![
@@ -24,23 +25,23 @@ impl<'a> IndexRow<'a> for SkeletonIndexRow {
     }
 }
 
-impl<'a> TryFrom<&'a TagTableRow> for SkeletonIndexRow {
-    type Error = TagTableRowParseError;
+impl<'a> TryFrom<&'a TagMapEntry> for SkeletonTagMapEntry {
+    type Error = TagMapEntryParseError;
 
-    fn try_from(row: &TagTableRow) -> Result<Self, Self::Error> {
-        let chunk_count = row
+    fn try_from(entry: &TagMapEntry) -> Result<Self, Self::Error> {
+        let chunk_count = entry
             .tag_map
             .get(&1)
-            .ok_or_else(|| TagTableRowParseError::TagNotFound("chunk_count".to_string()))?[0];
-        let geometry_pair = row
+            .ok_or_else(|| TagMapEntryParseError::TagNotFound("chunk_count".to_string()))?[0];
+        let geometry_pair = entry
             .tag_map
             .get(&6)
-            .ok_or_else(|| TagTableRowParseError::TagNotFound("geometry".to_string()))?;
+            .ok_or_else(|| TagMapEntryParseError::TagNotFound("geometry".to_string()))?;
         let start_offset = geometry_pair[0];
         let length = geometry_pair[1];
 
-        Ok(SkeletonIndexRow {
-            name: row.text.clone(),
+        Ok(SkeletonTagMapEntry {
+            name: entry.text.clone(),
             chunk_count,
             start_offset,
             length,
@@ -48,13 +49,13 @@ impl<'a> TryFrom<&'a TagTableRow> for SkeletonIndexRow {
     }
 }
 
-impl Into<TagTableRow> for SkeletonIndexRow {
-    fn into(self) -> TagTableRow {
-        let mut row = TagTableRow::default();
-        row.text = self.name;
-        row.tag_map
+impl Into<TagMapEntry> for SkeletonTagMapEntry {
+    fn into(self) -> TagMapEntry {
+        let mut entry = TagMapEntry::default();
+        entry.text = self.name;
+        entry.tag_map
             .insert(1, vec![self.chunk_count, self.chunk_count]);
-        row.tag_map.insert(
+        entry.tag_map.insert(
             6,
             vec![
                 self.start_offset,
@@ -63,7 +64,7 @@ impl Into<TagTableRow> for SkeletonIndexRow {
                 self.length,
             ],
         );
-        row
+        entry
     }
 }
 
@@ -78,22 +79,21 @@ mod tests {
 
     proptest! {
         #[test]
-        fn test_skeleton_index_row_roundtrip(row in any::<super::SkeletonIndexRow>()) {
-            println!("testing row: {:?}", row);
-            let table_row: TagTableRow = row.clone().into();
+        fn test_skeleton_entry_roundtrip(entry in any::<super::SkeletonTagMapEntry>()) {
+            let downcasted_entry: TagMapEntry = entry.clone().into();
 
             let mut serialized = Cursor::new(Vec::new());
             let mut writer = Writer::new(&mut serialized);
-            table_row.to_writer(&mut writer, &SkeletonIndexRow::get_tag_definitions()).unwrap();
+            downcasted_entry.to_writer(&mut writer, &SkeletonTagMapEntry::get_tag_definitions()).unwrap();
             writer.finalize().unwrap();
 
             serialized.set_position(0);
             let len = serialized.get_ref().len();
             let mut reader = Reader::new(&mut serialized);
-            let decoded = TagTableRow::from_reader_with_ctx(&mut reader, (len, &SkeletonIndexRow::get_tag_definitions())).unwrap();
-            let decoded = SkeletonIndexRow::try_from(&decoded).unwrap();
+            let decoded = TagMapEntry::from_reader_with_ctx(&mut reader, (len, &SkeletonTagMapEntry::get_tag_definitions())).unwrap();
+            let decoded = SkeletonTagMapEntry::try_from(&decoded).unwrap();
 
-            assert_eq!(row, decoded);
+            assert_eq!(entry, decoded);
         }
     }
 }

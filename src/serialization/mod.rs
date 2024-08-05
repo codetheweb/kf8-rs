@@ -14,5 +14,4 @@ pub use index::*;
 pub use indx_header::*;
 pub use mobi_header::*;
 pub use palmdoc::*;
-pub use tag_map::*;
 pub use tag_section::*;
