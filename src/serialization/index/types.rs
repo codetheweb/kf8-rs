@@ -84,7 +84,7 @@ pub enum TagTableRowParseError {
 }
 
 pub trait IndexRow<'a>:
-    TryFrom<&'a TagTableRow, Error = TagTableRowParseError> + Into<TagTableRow>
+    TryFrom<&'a TagTableRow, Error = TagTableRowParseError> + Into<TagTableRow> + Clone
 {
     fn get_tag_definitions() -> Vec<TagDefinition>;
 }
@@ -93,7 +93,7 @@ pub trait IndexRow<'a>:
 mod tests {
     use std::io::Cursor;
 
-    use crate::serialization::{END_TAG_DEFINITION, MASK_TO_BIT_SHIFTS};
+    use crate::serialization::{SkeletonIndexRow, END_TAG_DEFINITION, MASK_TO_BIT_SHIFTS};
 
     use super::*;
     use prop::sample::SizeRange;
@@ -104,7 +104,7 @@ mod tests {
     ) -> impl Strategy<Value = Vec<TagDefinition>> {
         let possible_masks = MASK_TO_BIT_SHIFTS
             .keys()
-            .filter(|m| m.count_ones() == 1)
+            // .filter(|m| m.count_ones() == 1)
             .copied()
             .collect::<Vec<u8>>();
 
@@ -116,14 +116,14 @@ mod tests {
         let tags =
             proptest::sample::subsequence(possible_tags.clone(), num_definitions).prop_shuffle();
 
-        tags.prop_flat_map(move |tags| {
+        tags.prop_ind_flat_map(move |tags| {
             let values_per_entry_power = proptest::collection::vec(0..=7u8, tags.len());
             let masks =
                 proptest::sample::subsequence(possible_masks.clone(), tags.len()).prop_shuffle();
 
-            (Just(tags), values_per_entry_power, masks)
+            (Just(tags), (values_per_entry_power, masks))
         })
-        .prop_map(move |(tags, values_per_entry_power, masks)| {
+        .prop_map(move |(tags, (values_per_entry_power, masks))| {
             let mut definitions = Vec::new();
             for i in 0..tags.len() {
                 definitions.push(
@@ -131,7 +131,6 @@ mod tests {
                         tags[i],
                         2u8.pow(values_per_entry_power[i].into()),
                         masks[i],
-                        0,
                     )
                     .unwrap(),
                 );
@@ -154,44 +153,77 @@ mod tests {
                 .collect::<Vec<TagDefinition>>()
         });
 
+        let value_count_multipliers = definitions
+            .clone()
+            .prop_ind_flat_map(|definitions| {
+                let len = definitions.len();
+                (
+                    Just(definitions),
+                    proptest::collection::vec(any::<bool>(), len),
+                )
+            })
+            .prop_map(|(definitions, is_value_count_multiplied)| {
+                println!("is_value_count_multiplied: {:?}", is_value_count_multiplied);
+                definitions
+                    .iter()
+                    .zip(is_value_count_multiplied)
+                    .map(|(d, is_multiplied)| {
+                        if is_multiplied && d.mask.count_ones() == 2 {
+                            println!("multiplied: {}", d.mask);
+                            // return d.mask.count_ones() as usize;
+                            return 2;
+                        }
+
+                        1
+                    })
+                    .collect::<Vec<usize>>()
+            });
+
         // This is a little weird (contiguous array) because proptest doesn't support Vec<impl Strategy> -> Strategy<Vec> yet
-        let values = definitions.clone().prop_flat_map(|definitions| {
-            let total_num_values = definitions
-                .iter()
-                .map(|d| d.values_per_entry as usize)
-                .sum::<usize>();
+        let maps = (definitions, value_count_multipliers)
+            .prop_flat_map(|(definitions, value_count_multipliers)| {
+                let total_num_values = definitions
+                    .iter()
+                    .zip(value_count_multipliers.clone())
+                    .map(|(d, multiplier)| d.values_per_entry as usize * multiplier)
+                    .sum::<usize>();
 
-            proptest::collection::vec(0u32..=u32::MAX, total_num_values)
-        });
+                (
+                    (Just(definitions), Just(value_count_multipliers)),
+                    proptest::collection::vec(0u32..=u32::MAX, total_num_values),
+                )
+            })
+            .prop_map(|((definitions, value_count_multipliers), mut values)| {
+                println!("multipliers: {:?}", value_count_multipliers);
+                let mut tag_map = HashMap::new();
+                for (definition, value_count_multiplier) in
+                    definitions.iter().zip(value_count_multipliers)
+                {
+                    let v = values
+                        .drain(0..definition.values_per_entry as usize * value_count_multiplier)
+                        .collect();
+                    tag_map.insert(definition.tag, v);
+                }
 
-        let maps = (definitions, values).prop_map(|(definitions, mut values)| {
-            let mut tag_map = HashMap::new();
-            for definition in definitions {
-                let v = values
-                    .drain(0..definition.values_per_entry as usize)
-                    .collect();
-                tag_map.insert(definition.tag, v);
-            }
-
-            tag_map
-        });
+                tag_map
+            });
 
         ("\\PC*", maps).prop_map(|(text, tag_map)| TagTableRow { text, tag_map })
     }
 
     fn arbitrary_definition_and_row() -> impl Strategy<Value = (Vec<TagDefinition>, TagTableRow)> {
         // Maximum number of definitions is limited by number of defined masks
-        arbitrary_definitions(1..=100).prop_flat_map(|definitions| {
-            let row = arbitrary_row(Just(definitions.clone()));
-
-            (Just(definitions), row)
+        arbitrary_definitions(1..=100).prop_ind_flat_map(|definitions| {
+            (
+                Just(definitions.clone()),
+                arbitrary_row(Just(definitions.clone())),
+            )
         })
     }
 
     proptest! {
       #![proptest_config(ProptestConfig {
-        // todo: why does this need to be so high?
-        max_shrink_iters: 200_000,
+        max_shrink_iters: 100_000,
         // this logic is kinda tricky, so let's give it 4x the normal number of cases
         cases: 1024,
         .. ProptestConfig::default()
@@ -199,6 +231,14 @@ mod tests {
 
       #[test]
       fn test_tag_table_row_roundtrip((definitions, row) in arbitrary_definition_and_row()) {
+        // println!("definitions:");
+        let mut masks = MASK_TO_BIT_SHIFTS.keys().copied().collect::<Vec<_>>();
+        masks.sort();
+        // println!("definitions: {:?}", definitions);
+        // for mask in masks {
+        //     println!("mask: {:08b} ({})", mask, mask);
+        // }
+
         env_logger::try_init();
 
         let mut serialized = Cursor::new(Vec::new());
@@ -213,5 +253,65 @@ mod tests {
 
         assert_eq!(row, decoded);
       }
+    }
+
+    #[test]
+    fn test_foo() {
+        env_logger::try_init();
+
+        let definitions = vec![
+            TagDefinition::new(102, 8, 8).unwrap(),
+            TagDefinition::new(186, 8, 32).unwrap(),
+            TagDefinition::new(234, 16, 48).unwrap(),
+            TagDefinition::new(60, 128, 2).unwrap(),
+            TagDefinition::new(193, 4, 4).unwrap(),
+            TagDefinition::new(10, 32, 12).unwrap(),
+            END_TAG_DEFINITION,
+        ];
+
+        let mut row = TagTableRow::default();
+
+        row.tag_map.insert(102, vec![0; 8]);
+        row.tag_map.insert(186, vec![0; 8]);
+        row.tag_map.insert(234, vec![0; 32]);
+        row.tag_map.insert(60, vec![0; 128]);
+        row.tag_map.insert(193, vec![0; 4]);
+        row.tag_map.insert(10, vec![0; 64]);
+
+        let mut serialized = Cursor::new(Vec::new());
+        let mut writer = Writer::new(&mut serialized);
+        row.to_writer(&mut writer, &definitions).unwrap();
+        writer.finalize().unwrap();
+
+        serialized.set_position(0);
+        let len = serialized.get_ref().len();
+        let mut reader = Reader::new(&mut serialized);
+        let decoded = TagTableRow::from_reader_with_ctx(&mut reader, (len, &definitions)).unwrap();
+
+        assert_eq!(row, decoded);
+    }
+
+    #[test]
+    fn test_foo1() {
+        let definitions = SkeletonIndexRow::get_tag_definitions();
+        let row = SkeletonIndexRow {
+            name: "foo".to_string(),
+            chunk_count: 0,
+            start_offset: 0,
+            length: 0,
+        };
+        let row: TagTableRow = row.into();
+
+        let mut serialized = Cursor::new(Vec::new());
+        let mut writer = Writer::new(&mut serialized);
+        row.to_writer(&mut writer, &definitions).unwrap();
+        writer.finalize().unwrap();
+
+        serialized.set_position(0);
+        let len = serialized.get_ref().len();
+        let mut reader = Reader::new(&mut serialized);
+        let decoded = TagTableRow::from_reader_with_ctx(&mut reader, (len, &definitions)).unwrap();
+
+        assert_eq!(row, decoded);
     }
 }
