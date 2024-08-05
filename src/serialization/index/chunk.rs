@@ -3,7 +3,7 @@ use crate::serialization::{TagDefinition, END_TAG_DEFINITION};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct ChunkIndexRow {
     // todo: rename?
@@ -70,11 +70,42 @@ impl Into<TagTableRow> for ChunkIndexRow {
 impl<'a> IndexRow<'a> for ChunkIndexRow {
     fn get_tag_definitions() -> Vec<TagDefinition> {
         vec![
-            TagDefinition::new(2, 1, 1, 0).unwrap(),
-            TagDefinition::new(3, 1, 2, 0).unwrap(),
-            TagDefinition::new(4, 1, 4, 0).unwrap(),
-            TagDefinition::new(6, 2, 8, 0).unwrap(),
+            TagDefinition::new(2, 1, 1).unwrap(),
+            TagDefinition::new(3, 1, 2).unwrap(),
+            TagDefinition::new(4, 1, 4).unwrap(),
+            TagDefinition::new(6, 2, 8).unwrap(),
             END_TAG_DEFINITION,
         ]
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::Cursor;
+
+    use super::*;
+    use deku::{reader::Reader, writer::Writer, DekuReader, DekuWriter};
+    use pretty_assertions::assert_eq;
+    use proptest::{arbitrary::any, proptest};
+
+    proptest! {
+        #[test]
+        fn test_chunk_index_row_roundtrip(row in any::<super::ChunkIndexRow>()) {
+            println!("testing row: {:?}", row);
+            let table_row: TagTableRow = row.clone().into();
+
+            let mut serialized = Cursor::new(Vec::new());
+            let mut writer = Writer::new(&mut serialized);
+            table_row.to_writer(&mut writer, &ChunkIndexRow::get_tag_definitions()).unwrap();
+            writer.finalize().unwrap();
+
+            serialized.set_position(0);
+            let len = serialized.get_ref().len();
+            let mut reader = Reader::new(&mut serialized);
+            let decoded = TagTableRow::from_reader_with_ctx(&mut reader, (len, &ChunkIndexRow::get_tag_definitions())).unwrap();
+            let decoded = ChunkIndexRow::try_from(&decoded).unwrap();
+
+            assert_eq!(row, decoded);
+        }
     }
 }
