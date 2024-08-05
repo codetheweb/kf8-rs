@@ -11,7 +11,7 @@ pub enum TagDefinitionConstructionError {
     #[error("Values per entry {0} is not a power of two")]
     ValuesPerEntryNotPowerOfTwo(u8),
     #[error("Mask {0} is unknown")]
-    InvalidMask(u8),
+    UnknownMask(u8),
 }
 
 #[deku_derive(DekuRead, DekuWrite)]
@@ -31,7 +31,6 @@ pub struct TagDefinition {
         )
     )]
     pub mask: u8,
-    #[cfg_attr(test, proptest(strategy = "0u8..=0u8"))]
     pub end_flag: u8,
     _private: (),
 }
@@ -41,9 +40,8 @@ impl TagDefinition {
         tag: u8,
         values_per_entry: u8,
         mask: u8,
-        end_flag: u8,
     ) -> Result<Self, TagDefinitionConstructionError> {
-        if tag == 0 && end_flag != 1 {
+        if tag == 0 {
             return Err(TagDefinitionConstructionError::ReservedTag(tag));
         }
 
@@ -54,14 +52,14 @@ impl TagDefinition {
         }
 
         if !MASK_TO_BIT_SHIFTS.contains_key(&mask) {
-            return Err(TagDefinitionConstructionError::InvalidMask(mask));
+            return Err(TagDefinitionConstructionError::UnknownMask(mask));
         }
 
         Ok(Self {
             tag,
             values_per_entry,
             mask,
-            end_flag,
+            end_flag: 0,
             _private: (),
         })
     }
