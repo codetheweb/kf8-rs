@@ -6,7 +6,7 @@ const INDX_HEADER_SIZE: usize = 36;
 
 #[deku_derive(DekuRead, DekuWrite)]
 #[deku(endian = "big", magic = b"INDX")]
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct IndxHeader {
     // Something is really slow for large values of len

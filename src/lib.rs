@@ -333,6 +333,7 @@ mod tests {
 
     #[test]
     fn extract_raw_html() {
+        env_logger::try_init();
         let mut reader = std::fs::File::open("resources/war_and_peace.azw3").unwrap();
         let mut data = Vec::new();
         reader.read_to_end(&mut data).unwrap();

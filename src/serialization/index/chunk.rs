@@ -63,7 +63,9 @@ impl Into<TagMapEntry> for ChunkTagMapEntry {
         entry.tag_map.insert(2, vec![self.cncx_offset]);
         entry.tag_map.insert(3, vec![self.file_number]);
         entry.tag_map.insert(4, vec![self.sequence_number]);
-        entry.tag_map.insert(6, vec![self.start_offset, self.length]);
+        entry
+            .tag_map
+            .insert(6, vec![self.start_offset, self.length]);
         entry
     }
 }

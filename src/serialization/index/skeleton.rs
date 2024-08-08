@@ -53,7 +53,8 @@ impl Into<TagMapEntry> for SkeletonTagMapEntry {
     fn into(self) -> TagMapEntry {
         let mut entry = TagMapEntry::default();
         entry.text = self.name;
-        entry.tag_map
+        entry
+            .tag_map
             .insert(1, vec![self.chunk_count, self.chunk_count]);
         entry.tag_map.insert(
             6,
