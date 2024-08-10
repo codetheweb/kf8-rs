@@ -329,7 +329,7 @@ impl TryFrom<&Book> for PalmDoc {
             },
             first_resource_record: u32::MAX, // todo
             exth_flags: ExthFlags {
-                has_exth: false, // todo
+                has_exth: true,
                 has_fonts: false,
                 is_periodical: false,
             },
@@ -351,7 +351,7 @@ impl TryFrom<&Book> for PalmDoc {
             skel_index: skel_index as u32,
             datp_index: u32::MAX,
             guide_index,
-            exth: None, // todo
+            exth: Some(Exth::default()), // todo
         };
         records[0] = mobi_header.to_bytes()?;
 
