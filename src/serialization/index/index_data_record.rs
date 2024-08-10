@@ -11,7 +11,7 @@ use super::types::{IndexTagMapEntry, TagMapEntryParseError};
 
 #[derive(Debug, PartialEq)]
 pub struct IndexDataRecord {
-    header: IndxHeader,
+    pub header: IndxHeader,
     pub entries: Vec<TagMapEntry>,
 }
 

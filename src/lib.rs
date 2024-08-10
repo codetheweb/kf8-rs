@@ -306,8 +306,7 @@ fn parse_index_data<'a>(
     let (_, index_definition_record) =
         IndexDefinitionRecord::from_bytes((indx_section_data, 0)).unwrap();
 
-    for i in (section_i + 1)..(section_i + 1 + index_definition_record.header.num_entries as usize)
-    {
+    for i in (section_i + 1)..(section_i + 1 + index_definition_record.num_of_records as usize) {
         let data = palmdoc.records[i].as_slice();
 
         let mut cursor = Cursor::new(&data);

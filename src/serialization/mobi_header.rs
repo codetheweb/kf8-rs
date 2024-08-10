@@ -294,6 +294,53 @@ pub struct MobiHeader {
     pub title: String,
 }
 
+impl Default for MobiHeader {
+    fn default() -> Self {
+        MobiHeader {
+            compression_type: CompressionType::None,
+            text_length: 0,
+            last_text_record: 0,
+            text_record_size: 0,
+            book_type: BookType::Book,
+            text_encoding: Codepage::Cp1252,
+            uid: 0,
+            file_version: 0,
+            first_non_text_record: 0,
+            title_offset: 0,
+            language_code: LanguageCode {
+                main: None,
+                sub: None,
+            },
+            first_resource_record: 0,
+            exth_flags: ExthFlags {
+                has_exth: false,
+                has_fonts: false,
+                is_periodical: false,
+            },
+            fdst_record: 0,
+            fdst_count: 0,
+            fcis_record: 0,
+            fcis_count: 0,
+            flis_record: 0,
+            flis_count: 0,
+            srcs_record: 0,
+            srcs_count: 0,
+            extra_data_flags: ExtraDataFlags {
+                extra_multibyte_bytes_after_text_records: false,
+                has_tbs: false,
+                uncrossable_breaks: false,
+            },
+            ncx_index: 0,
+            chunk_index: 0,
+            skel_index: 0,
+            datp_index: 0,
+            guide_index: 0,
+            exth: None,
+            title: String::new(),
+        }
+    }
+}
+
 impl MobiHeader {
     pub fn sizeof_trailing_section_entries(&self, section_data: &[u8]) -> usize {
         let mut num = 0;

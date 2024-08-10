@@ -5,7 +5,7 @@ use proptest_derive::Arbitrary;
 use super::tag_map::TagDefinition;
 
 #[deku_derive(DekuRead, DekuWrite)]
-#[deku(endian = "big", magic = b"TAGX")]
+#[deku(magic = b"TAGX", endian = "endian", ctx = "endian: deku::ctx::Endian")]
 #[derive(Debug, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct TagMapDefinition {
@@ -30,12 +30,12 @@ mod tests {
       fn test_tag_section_roundtrip(section in any::<TagMapDefinition>()) {
         let mut serialized = Cursor::new(Vec::new());
         let mut writer = Writer::new(&mut serialized);
-        section.to_writer(&mut writer, ()).unwrap();
+        section.to_writer(&mut writer, deku::ctx::Endian::Big).unwrap();
         writer.finalize().unwrap();
 
         serialized.set_position(0);
         let mut reader = Reader::new(&mut serialized);
-        let decoded = TagMapDefinition::from_reader_with_ctx(&mut reader, ()).unwrap();
+        let decoded = TagMapDefinition::from_reader_with_ctx(&mut reader, deku::ctx::Endian::Big).unwrap();
 
         assert_eq!(section, decoded);
       }

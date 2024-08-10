@@ -4,8 +4,9 @@ use proptest_derive::Arbitrary;
 
 const INDX_HEADER_SIZE: usize = 36;
 
+// todo: combine with other header?
 #[deku_derive(DekuRead, DekuWrite)]
-#[deku(endian = "big", magic = b"INDX")]
+#[deku(magic = b"INDX", endian = "big")]
 #[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct IndxHeader {
