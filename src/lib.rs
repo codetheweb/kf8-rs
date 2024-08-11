@@ -1,3 +1,4 @@
+use binrw::BinRead;
 use deku::prelude::*;
 use nom::{bytes::complete::take, error::Error, IResult};
 use serialization::{
@@ -79,9 +80,9 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
     let (input, _) = take(2usize)(input)?; // Skip 2 bytes
 
     // todo: use first section offset instead of manually skipping bytes above?
-    let (_, book_header) =
-        crate::serialization::MobiHeader::from_bytes((&palmdoc.records.first().unwrap(), 0))
-            .expect("could not parse header");
+    let mut first_record = Cursor::new(&palmdoc.records[0]);
+    let book_header =
+        crate::serialization::MobiHeader::read(&mut first_record).expect("could not parse header");
 
     // todo: assert that header is k8?
 

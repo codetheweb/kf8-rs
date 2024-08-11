@@ -4,13 +4,14 @@ use std::{
     u32,
 };
 
+use binrw::{BinRead, BinWrite};
 use deku::prelude::*;
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
 use crate::{
-    constants::{MainLanguage, SubLanguage},
-    serialization::{CNCXRecords, FDSTEntry, SkeletonTagMapEntry},
+    constants::{MainLanguage, MetadataId, SubLanguage},
+    serialization::{tag_map::TagMapEntry, CNCXRecords, FDSTEntry, SkeletonTagMapEntry},
 };
 
 use super::{
@@ -24,12 +25,20 @@ const TEXT_RECORD_SIZE: usize = 4096; // todo: assert that chunks are this lengt
 
 #[derive(Debug, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
+pub struct BookPart {
+    pub skeleton_head: String,
+    pub content: String,
+    pub skeleton_tail: String,
+}
+
+#[derive(Debug, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct Book {
     pub title: String,
     pub uid: u32,
     pub main_language: Option<MainLanguage>,
     pub sub_language: Option<SubLanguage>,
-    pub text: String,
+    pub book_parts: Vec<BookPart>,
 }
 
 impl TryFrom<PalmDoc> for Book {
@@ -40,7 +49,7 @@ impl TryFrom<PalmDoc> for Book {
             .records
             .first()
             .ok_or(DekuError::Parse("No records".into()))?;
-        let (_, mobi_header) = MobiHeader::from_bytes((first_record, 0))?;
+        let mobi_header = MobiHeader::read(&mut Cursor::new(first_record)).unwrap();
 
         let mut text = Vec::new();
         for i in 1..(mobi_header.last_text_record + 1) as usize {
@@ -68,11 +77,11 @@ impl TryFrom<PalmDoc> for Book {
         }
 
         Ok(Book {
-            title: mobi_header.title,
+            title: mobi_header.title.try_into().unwrap(),
             uid: mobi_header.uid,
             main_language: mobi_header.language_code.main,
             sub_language: mobi_header.language_code.sub,
-            text: String::from_utf8(text).map_err(|_| DekuError::Parse("Invalid UTF-8".into()))?,
+            book_parts: vec![], // todo
         })
     }
 }
@@ -151,10 +160,20 @@ impl TryFrom<&Book> for PalmDoc {
         let mut records = vec![];
 
         // Placeholder for header (having a placeholder here allows us to easily calculate record offsets without adding +1 everywhere).
-        records.push(MobiHeader::default().to_bytes()?);
+        records.push(vec![]);
 
         // Text records
-        let mut text_cursor = Cursor::new(book.text.as_bytes());
+        let text = book
+            .book_parts
+            .iter()
+            .map(|part| {
+                format!(
+                    "{}{}{}",
+                    part.skeleton_head, part.skeleton_tail, part.content
+                )
+            })
+            .collect::<String>();
+        let mut text_cursor = Cursor::new(text.as_bytes());
         while text_cursor.position() < text_cursor.get_ref().len() as u64 {
             let (record, mut overlap) = create_text_record(&mut text_cursor);
             // todo: make compression configurable?
@@ -201,22 +220,32 @@ impl TryFrom<&Book> for PalmDoc {
             .to_bytes()
             .unwrap(),
         );
+
+        // Chunk records
+        let chunk_records = book
+            .book_parts
+            .iter()
+            .map(|part| {
+                ChunkTagMapEntry {
+                    insert_position: part.skeleton_head.len() as u32,
+                    cncx_offset: 0,
+                    file_number: 0,
+                    sequence_number: 0,
+                    start_offset: 0,
+                    length: part.content.len() as u32,
+                }
+                .into()
+            })
+            .collect::<Vec<TagMapEntry>>();
+
         let mut serialized_record = Cursor::new(vec![]);
         let record = IndexDataRecord {
             header: IndxHeader {
                 len: 36 + 156, // 192
                 block_offset: 0,
-                num_entries: 1,
+                num_entries: chunk_records.len() as u32,
             },
-            entries: vec![ChunkTagMapEntry {
-                insert_position: 0,
-                cncx_offset: 0,
-                file_number: 0,
-                sequence_number: 0,
-                start_offset: 0,
-                length: book.text.len() as u32,
-            }
-            .into()],
+            entries: chunk_records,
         };
         let mut writer = Writer::new(&mut serialized_record);
         record
@@ -255,20 +284,30 @@ impl TryFrom<&Book> for PalmDoc {
             .unwrap(),
         );
 
+        // Skeleton records
+        let skeleton_entries = book
+            .book_parts
+            .iter()
+            .enumerate()
+            .map(|(i, part)| {
+                SkeletonTagMapEntry {
+                    name: format!("SKELETON_{}", i),
+                    chunk_count: 1,
+                    start_offset: 0,
+                    length: part.skeleton_head.len() as u32 + part.skeleton_tail.len() as u32,
+                }
+                .into()
+            })
+            .collect::<Vec<TagMapEntry>>();
+
         let mut serialized_record = Cursor::new(vec![]);
         let record = IndexDataRecord {
             header: IndxHeader {
                 len: 36 + 156, // 192
                 block_offset: 0,
-                num_entries: 1,
+                num_entries: skeleton_entries.len() as u32,
             },
-            entries: vec![SkeletonTagMapEntry {
-                name: "TEST_SKELLY".into(),
-                chunk_count: 1,
-                start_offset: 0,
-                length: book.text.len() as u32,
-            }
-            .into()],
+            entries: skeleton_entries,
         };
         let mut writer = Writer::new(&mut serialized_record);
         record
@@ -292,7 +331,7 @@ impl TryFrom<&Book> for PalmDoc {
             FDSTTable {
                 entries: vec![FDSTEntry {
                     start: 0,
-                    end: book.text.len() as u32,
+                    end: text.len() as u32,
                 }],
             }
             .to_bytes()
@@ -301,7 +340,7 @@ impl TryFrom<&Book> for PalmDoc {
 
         // FCIS
         let fcis_record = records.len();
-        records.push(create_fcis_record(book.text.len()));
+        records.push(create_fcis_record(text.len()));
 
         // FLIS
         let flis_record = records.len();
@@ -310,11 +349,15 @@ impl TryFrom<&Book> for PalmDoc {
         // EOF
         records.push(b"\xe9\x8e\r\n".to_vec());
 
+        let mut exth = Exth::default();
+        exth.metadata_id
+            .insert(MetadataId::Creator, vec!["kindle".into()]);
+
         // todo: consistent terms between _record and _index
         let mobi_header = MobiHeader {
-            title: book.title.clone(),
+            title: book.title.clone().into(),
             compression_type: CompressionType::PalmDoc,
-            text_length: book.text.len() as u32,
+            text_length: text.len() as u32,
             last_text_record: last_text_record as u16,
             text_record_size: TEXT_RECORD_SIZE as u16,
             book_type: BookType::Book,
@@ -322,7 +365,6 @@ impl TryFrom<&Book> for PalmDoc {
             uid: book.uid,
             file_version: 8,
             first_non_text_record: first_non_text_record as u32,
-            title_offset: 0, // todo: ?
             language_code: LanguageCode {
                 main: book.main_language.clone(),
                 sub: book.sub_language.clone(),
@@ -351,9 +393,11 @@ impl TryFrom<&Book> for PalmDoc {
             skel_index: skel_index as u32,
             datp_index: u32::MAX,
             guide_index,
-            exth: Some(Exth::default()), // todo
+            exth: Some(exth),
         };
-        records[0] = mobi_header.to_bytes()?;
+        let mut header_serialized = Cursor::new(vec![]);
+        mobi_header.write(&mut header_serialized).unwrap();
+        records[0] = header_serialized.into_inner();
 
         println!("records: {:?}", records);
 

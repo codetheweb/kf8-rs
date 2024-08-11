@@ -1,6 +1,7 @@
-use std::io::{Read, Write};
+use std::io::SeekFrom;
 
-use deku::prelude::*;
+use binrw::{prelude::*, NullString, PosValue};
+use deku::{DekuReader, DekuWriter};
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
@@ -10,62 +11,102 @@ use super::exth::Exth;
 
 #[derive(Debug, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
+#[binrw]
+#[brw(big)]
+struct SerializedExth {
+    #[br(parse_with = parse_exth)]
+    #[bw(write_with = write_exth)]
+    exth: Exth,
+}
+
+#[binrw::parser(reader)]
+fn parse_exth() -> BinResult<Exth> {
+    let mut deku_reader = deku::reader::Reader::new(reader);
+    let parsed = Exth::from_reader_with_ctx(&mut deku_reader, ()).unwrap();
+    Ok(parsed)
+}
+
+#[binrw::writer(writer)]
+fn write_exth(exth: &Exth) -> BinResult<()> {
+    let mut deku_writer = deku::writer::Writer::new(writer);
+    exth.to_writer(&mut deku_writer, ()).unwrap();
+    Ok(())
+}
+
+#[binrw::parser(reader, endian)]
+fn parse_language_code() -> BinResult<LanguageCode> {
+    let langcode = u32::read_options(reader, endian, ())?;
+
+    let langid = langcode & 0xff;
+    let sublangid = (langcode >> 10) & 0xff;
+
+    // todo: don't unwrap
+    let language = if langid == 0 {
+        None
+    } else {
+        MainLanguage::try_from(langid).ok()
+    };
+    let sub_language = if sublangid == 0 {
+        None
+    } else {
+        SubLanguage::try_from(sublangid).ok()
+    };
+
+    Ok(LanguageCode {
+        main: language,
+        sub: sub_language,
+    })
+}
+
+#[binrw::writer(writer, endian)]
+fn write_language_code(langcode: &LanguageCode) -> BinResult<()> {
+    let language = langcode
+        .main
+        .clone()
+        .map_or(0, |language| u8::from(language) as u32);
+    let sub_language = langcode
+        .sub
+        .clone()
+        .map_or(0, |sub_language| u8::from(sub_language) as u32);
+    let langcode = (sub_language << 10) | language;
+
+    langcode.write_options(writer, endian, ())
+}
+
+#[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(test, derive(Arbitrary))]
 pub struct LanguageCode {
     pub main: Option<MainLanguage>,
     pub sub: Option<SubLanguage>,
 }
 
-impl<'a, Ctx> DekuReader<'a, Ctx> for LanguageCode {
-    fn from_reader_with_ctx<R: Read>(reader: &mut Reader<R>, ctx: Ctx) -> Result<Self, DekuError>
-    where
-        Self: Sized,
-    {
-        let langcode = u32::from_reader_with_ctx(reader, ())?;
-
-        let langid = langcode & 0xff;
-        let sublangid = (langcode >> 10) & 0xff;
-
-        // todo: don't unwrap
-        let language = if langid == 0 {
-            None
-        } else {
-            MainLanguage::try_from(langid).ok()
-        };
-        let sub_language = if sublangid == 0 {
-            None
-        } else {
-            SubLanguage::try_from(sublangid).ok()
-        };
-
-        Ok(LanguageCode {
-            main: language,
-            sub: sub_language,
-        })
-    }
-}
-
-impl<Ctx> DekuWriter<Ctx> for LanguageCode {
-    fn to_writer<W: Write>(&self, writer: &mut Writer<W>, _ctx: Ctx) -> Result<(), DekuError> {
-        let language = self
-            .main
-            .clone()
-            .map_or(0, |language| u8::from(language) as u32);
-        let sub_language = self
-            .sub
-            .clone()
-            .map_or(0, |sub_language| u8::from(sub_language) as u32);
-        let langcode = (sub_language << 10) | language;
-
-        langcode.to_writer(writer, ())
-    }
-}
-
 #[derive(Debug, PartialEq)]
+#[binrw]
+#[brw(big)]
+#[cfg_attr(test, derive(Arbitrary))]
+pub struct SerializedLanguageCode {
+    #[br(parse_with = parse_language_code)]
+    #[bw(write_with = write_language_code)]
+    language_code: LanguageCode,
+}
+
+#[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct ExtraDataFlags {
     pub extra_multibyte_bytes_after_text_records: bool,
     pub has_tbs: bool,
     pub uncrossable_breaks: bool,
+}
+
+// todo: should this be pub?
+#[binrw]
+#[brw(big)]
+#[derive(Debug, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
+pub struct SerializedExtraDataFlags {
+    #[br(parse_with = parse_extra_data_flags)]
+    #[bw(write_with = write_extra_data_flags)]
+    pub flags: ExtraDataFlags,
 }
 
 impl ExtraDataFlags {
@@ -88,28 +129,23 @@ impl ExtraDataFlags {
     }
 }
 
-impl<'a, Ctx> DekuReader<'a, Ctx> for ExtraDataFlags {
-    fn from_reader_with_ctx<R: Read>(reader: &mut Reader<R>, ctx: Ctx) -> Result<Self, DekuError>
-    where
-        Self: Sized,
-    {
-        let flags = u32::from_reader_with_ctx(reader, deku::ctx::Endian::Big)?;
+#[binrw::parser(reader, endian)]
+fn parse_extra_data_flags() -> BinResult<ExtraDataFlags> {
+    let flags = u32::read_options(reader, endian, ())?;
 
-        Ok(ExtraDataFlags {
-            extra_multibyte_bytes_after_text_records: (flags & 0b1) != 0,
-            has_tbs: (flags & 0b10) != 0,
-            uncrossable_breaks: (flags & 0b100) != 0,
-        })
-    }
+    Ok(ExtraDataFlags {
+        extra_multibyte_bytes_after_text_records: (flags & 0b1) != 0,
+        has_tbs: (flags & 0b10) != 0,
+        uncrossable_breaks: (flags & 0b100) != 0,
+    })
 }
 
-impl<Ctx> DekuWriter<Ctx> for ExtraDataFlags {
-    fn to_writer<W: Write>(&self, writer: &mut Writer<W>, _ctx: Ctx) -> Result<(), DekuError> {
-        self.encode().to_writer(writer, deku::ctx::Endian::Big)
-    }
+#[binrw::writer(writer, endian)]
+fn write_extra_data_flags(flags: &ExtraDataFlags) -> BinResult<()> {
+    flags.encode().write_options(writer, endian, ())
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct ExthFlags {
     pub has_exth: bool,
@@ -117,79 +153,100 @@ pub struct ExthFlags {
     pub is_periodical: bool,
 }
 
-impl<'a, Ctx> DekuReader<'a, Ctx> for ExthFlags {
-    fn from_reader_with_ctx<R: Read>(reader: &mut Reader<R>, ctx: Ctx) -> Result<Self, DekuError>
-    where
-        Self: Sized,
-    {
-        let flags = u32::from_reader_with_ctx(reader, deku::ctx::Endian::Big)?;
-        let has_exth = flags & 0b1010000 != 0;
-        let has_fonts = flags & 0b1000000000000 != 0;
-        let is_periodical = flags & 0b1000 != 0;
-
-        Ok(ExthFlags {
-            has_exth,
-            has_fonts,
-            is_periodical,
-        })
-    }
-}
-
-impl<Ctx> DekuWriter<Ctx> for ExthFlags {
-    fn to_writer<W: Write>(&self, writer: &mut Writer<W>, _ctx: Ctx) -> Result<(), DekuError> {
-        let mut flags = 0;
-        if self.has_exth {
-            flags |= 0b1010000;
-        }
-        if self.has_fonts {
-            flags |= 0b1000000000000;
-        }
-        if self.is_periodical {
-            flags |= 0b1000;
-        }
-
-        flags.to_writer(writer, deku::ctx::Endian::Big)
-    }
-}
-
-#[derive(Debug, PartialEq, DekuRead, DekuWrite)]
-#[deku(id_type = "u32", ctx = "endian: deku::ctx::Endian", endian = "endian")]
+#[derive(Debug, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
+#[binrw]
+#[brw(big)]
+pub struct SerializedExthFlags {
+    #[br(parse_with = parse_exth_flags)]
+    #[bw(write_with = write_exth_flags)]
+    pub flags: ExthFlags,
+}
+
+#[binrw::parser(reader, endian)]
+fn parse_exth_flags() -> BinResult<ExthFlags> {
+    let flags = u32::read_options(reader, endian, ())?;
+    let has_exth = flags & 0b1010000 != 0;
+    let has_fonts = flags & 0b1000000000000 != 0;
+    let is_periodical = flags & 0b1000 != 0;
+
+    Ok(ExthFlags {
+        has_exth,
+        has_fonts,
+        is_periodical,
+    })
+}
+
+#[binrw::writer(writer, endian)]
+fn write_exth_flags(flags: &ExthFlags) -> BinResult<()> {
+    let mut encoded = 0;
+    if flags.has_exth {
+        encoded |= 0b1010000;
+    }
+    if flags.has_fonts {
+        encoded |= 0b1000000000000;
+    }
+    if flags.is_periodical {
+        encoded |= 0b1000;
+    }
+
+    encoded.write_options(writer, endian, ())
+}
+
+#[derive(Debug, PartialEq)]
+#[cfg_attr(test, derive(Arbitrary))]
+#[binrw]
+#[brw(big, repr(u32))]
 pub enum Codepage {
-    #[deku(id = "0x000004e4")]
-    Cp1252,
-    #[deku(id = "0x0000fde9")]
-    Utf8,
+    Cp1252 = 0x000004e4,
+    Utf8 = 0x0000fde9,
 }
 
-#[derive(Debug, PartialEq, DekuRead, DekuWrite, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(test, derive(Arbitrary))]
-#[deku(id_type = "u16", ctx = "endian: deku::ctx::Endian", endian = "endian")]
+#[binrw]
+#[brw(big, repr(u16))]
 pub enum CompressionType {
-    #[deku(id = 0x0001)]
-    None,
-    #[deku(id = 0x0002)]
-    PalmDoc,
-    #[deku(id = 0x4448)]
-    HuffCdic,
+    None = 0x0001,
+    PalmDoc = 0x0002,
+    HuffCdic = 0x4448,
 }
 
-#[derive(Debug, PartialEq, DekuRead, DekuWrite, Clone)]
+#[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(test, derive(Arbitrary))]
-#[deku(id_type = "u32", ctx = "endian: deku::ctx::Endian", endian = "endian")]
+#[binrw]
+#[brw(big, repr(u32))]
 pub enum BookType {
-    #[deku(id = 0x2)]
-    Book,
-    #[deku(id = 0x101)]
-    NewsHierarchal,
-    #[deku(id = 0x102)]
-    NewsFlat,
-    #[deku(id = 0x103)]
-    NewsMagazine,
+    Book = 0x2,
+    NewsHierarchal = 0x101,
+    NewsFlat = 0x102,
+    NewsMagazine = 0x103,
 }
 
-#[deku_derive(DekuRead, DekuWrite)]
-#[deku(endian = "big")]
+#[cfg(test)]
+fn any_null_string() -> impl proptest::prelude::Strategy<Value = NullString> {
+    use proptest::prelude::Strategy;
+
+    // todo: 64 is arbitrary, allow all UTF-8
+    "[a-zA-Z0-9]{0, 64}".prop_map(|v| NullString(v.into()))
+}
+
+#[binrw::writer(writer, endian)]
+fn write_string_and_offset(s: &NullString) -> BinResult<()> {
+    let current_position = writer.stream_position()?;
+    println!("current_position: {}", current_position);
+    writer.seek(SeekFrom::Start(0x54))?;
+
+    let offset: u32 = current_position as u32;
+    offset.write_options(writer, endian, ())?;
+
+    writer.seek(SeekFrom::Start(current_position))?;
+    s.write(writer)?;
+    Ok(())
+}
+
+#[binrw]
+#[brw(big)]
 #[derive(Debug, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
 #[cfg_attr(
@@ -198,63 +255,92 @@ pub enum BookType {
 )]
 pub struct MobiHeader {
     pub compression_type: CompressionType,
-    #[deku(temp, temp_value = "[0x00; 2]")]
+    #[br(temp)]
+    #[bw(calc = [0x00; 2])]
     _unused0: [u8; 2],
     pub text_length: u32,
     pub last_text_record: u16,
     pub text_record_size: u16,
-    #[deku(temp, temp_value = "0")]
+    #[br(temp)]
+    #[bw(calc = 0)]
     encryption_type: u16,
-    #[deku(temp, temp_value = "[0x00; 2]")]
+    #[br(temp)]
+    #[bw(calc = [0x00; 2])]
     _unused1: [u8; 2],
-    #[deku(temp, temp_value = "*b\"MOBI\"")]
+    #[br(temp)]
+    #[bw(calc = *b"MOBI")]
     ident: [u8; 4], // todo
-    #[deku(temp, temp_value = "264")]
+    #[br(temp)]
+    #[bw(calc = 264)]
     header_length: u32,
     pub book_type: BookType,
     pub text_encoding: Codepage,
     pub uid: u32,          // todo
-    pub file_version: u32, // todo
-    #[deku(temp, temp_value = "u32::MAX")]
+    pub file_version: u32, // todo 36
+    #[br(temp)]
+    #[bw(calc = u32::MAX)]
     pub meta_orth_record: u32,
-    #[deku(temp, temp_value = "u32::MAX")]
-    pub meta_infl_index: u32,
-    #[deku(temp, temp_value = "[u32::MAX; 8]")]
-    pub extra_indices: [u32; 8],
+    #[br(temp)]
+    #[bw(calc = u32::MAX)]
+    pub meta_infl_index: u32, // 44
+    #[br(temp)]
+    #[bw(calc = [u32::MAX; 8])]
+    pub extra_indices: [u32; 8], // 72
     pub first_non_text_record: u32,
-    pub title_offset: u32, // todo: derive with deku?
-    #[deku(temp, temp_value = "title.len() as u32")]
+    #[br(temp)]
+    #[bw(calc = 0)]
+    title_offset: u32, // todo: derive with deku?
+    #[br(temp)]
+    #[bw(calc = title.len() as u32)]
     pub title_length: u32,
-    pub language_code: LanguageCode, // language_code
-    #[deku(temp, temp_value = "0")]
+    #[br(map = |v: SerializedLanguageCode| v.language_code)]
+    #[bw(map = |v: &LanguageCode| SerializedLanguageCode { language_code: v.clone() })]
+    pub language_code: LanguageCode,
+    #[br(temp)]
+    #[bw(calc = 0)]
     in_lang: u32,
-    #[deku(temp, temp_value = "0")]
+    #[br(temp)]
+    #[bw(calc = 0)]
     out_lang: u32,
-    #[deku(temp, temp_value = "*file_version")]
+    #[br(temp)]
+    #[bw(calc = *file_version)]
     min_version: u32,
     pub first_resource_record: u32,
-    #[deku(temp, temp_value = "0")]
+    #[br(temp)]
+    #[bw(calc = 0)]
     huff_first_record: u32,
-    #[deku(temp, temp_value = "0")]
+    #[br(temp)]
+    #[bw(calc = 0)]
     huff_count: u32,
-    #[deku(temp, temp_value = "[0; 4]")]
+    #[br(temp)]
+    #[bw(calc = [0; 4])]
     huff_table_offset: [u8; 4],
-    #[deku(temp, temp_value = "[0; 4]")]
+    #[br(temp)]
+    #[bw(calc = [0; 4])]
     huff_table_length: [u8; 4],
+    #[br(map = |v: SerializedExthFlags| v.flags)]
+    #[bw(map = |v: &ExthFlags| SerializedExthFlags { flags: v.clone() })]
     pub exth_flags: ExthFlags, // todo
-    #[deku(temp, temp_value = "[0; 32]")]
+    #[br(temp)]
+    #[bw(calc = [0; 32])]
     _unused2: [u8; 32],
-    #[deku(temp, temp_value = "u32::MAX")]
+    #[br(temp)]
+    #[bw(calc = u32::MAX)]
     _unused3: u32,
-    #[deku(temp, temp_value = "u32::MAX")]
+    #[br(temp)]
+    #[bw(calc = u32::MAX)]
     drm_offset: u32,
-    #[deku(temp, temp_value = "0")]
+    #[br(temp)]
+    #[bw(calc = 0)]
     drm_count: u32,
-    #[deku(temp, temp_value = "0")]
+    #[br(temp)]
+    #[bw(calc = 0)]
     drm_size: u32,
-    #[deku(temp, temp_value = "0")]
+    #[br(temp)]
+    #[bw(calc = 0)]
     drm_flags: u32,
-    #[deku(temp, temp_value = "[0x00; 8]")]
+    #[br(temp)]
+    #[bw(calc = [0x00; 8])]
     _unused4: [u8; 8],
     pub fdst_record: u32, // todo
     pub fdst_count: u32,  // todo
@@ -264,34 +350,41 @@ pub struct MobiHeader {
     pub flis_record: u32, // todo
     // #[deku(assert_eq = "1")]
     pub flis_count: u32, // todo
-    #[deku(temp, temp_value = "[0x00; 8]")]
+    #[br(temp)]
+    #[bw(calc = [0x00; 8])]
     _unused5: [u8; 8],
     pub srcs_record: u32, // todo
     pub srcs_count: u32,  // todo
-    #[deku(temp, temp_value = "[0xff; 8]")]
+    #[br(temp)]
+    #[bw(calc = [0xff; 8])]
     _unused6: [u8; 8],
+    #[br(map = |v: SerializedExtraDataFlags| v.flags)]
+    #[bw(map = |v: &ExtraDataFlags| SerializedExtraDataFlags { flags: v.clone() })]
     pub extra_data_flags: ExtraDataFlags, // todo
     pub ncx_index: u32,
     pub chunk_index: u32,
     pub skel_index: u32,
     pub datp_index: u32,
     pub guide_index: u32,
-    #[deku(temp, temp_value = "[0xff; 4]")]
+    #[br(temp)]
+    #[bw(calc = [0xff; 4])]
     _unused7: [u8; 4],
-    #[deku(temp, temp_value = "[0x00; 4]")]
+    #[br(temp)]
+    #[bw(calc = [0x00; 4])]
     _unused8: [u8; 4],
-    #[deku(temp, temp_value = "[0xff; 4]")]
+    #[br(temp)]
+    #[bw(calc = [0xff; 4])]
     _unused9: [u8; 4],
-    #[deku(temp, temp_value = "[0x00; 4]")]
+    #[br(temp)]
+    #[bw(calc = [0x00; 4])]
     _unused10: [u8; 4],
     // todo: add a deku assert to relate to flags
-    #[deku(cond = "exth_flags.has_exth")]
+    #[br(if(exth_flags.has_exth), map = |v: Option<SerializedExth>| v.map(|v| v.exth))]
+    #[bw(if(exth_flags.flags.has_exth), map = |v: &Option<Exth>| v.clone().map(|v| SerializedExth { exth: v }))]
     pub exth: Option<Exth>,
-    #[deku(
-        reader = "crate::utils::deku::read_string(deku::reader, *title_length as usize)",
-        writer = "crate::utils::deku::write_string(deku::writer, title)"
-    )]
-    pub title: String,
+    #[cfg_attr(test, proptest(strategy = "any_null_string()"))]
+    #[bw(write_with = write_string_and_offset)]
+    pub title: NullString,
 }
 
 impl Default for MobiHeader {
@@ -306,7 +399,6 @@ impl Default for MobiHeader {
             uid: 0,
             file_version: 0,
             first_non_text_record: 0,
-            title_offset: 0,
             language_code: LanguageCode {
                 main: None,
                 sub: None,
@@ -336,7 +428,7 @@ impl Default for MobiHeader {
             datp_index: 0,
             guide_index: 0,
             exth: None,
-            title: String::new(),
+            title: String::new().into(),
         }
     }
 }
@@ -394,6 +486,8 @@ impl MobiHeader {
 
 #[cfg(test)]
 mod tests {
+    use std::io::Cursor;
+
     use super::*;
     use pretty_assertions::assert_eq;
     use proptest::{arbitrary::any, proptest};
@@ -401,12 +495,12 @@ mod tests {
     proptest! {
         #[test]
         fn test_mobi_header_roundtrip(header in any::<MobiHeader>()) {
-          let serialized = header.to_bytes().unwrap();
+            let mut serialized = Cursor::new(Vec::new());
+            header.write(&mut serialized).expect("could not serialize");
+            serialized.set_position(0);
 
-          let ((remaining, _), parsed) = MobiHeader::from_bytes((&serialized, 0)).expect("could not parse");
-
-          assert_eq!(parsed, header);
-          assert_eq!(remaining.len(), 0);
+            let parsed = MobiHeader::read(&mut serialized).expect("could not parse");
+            assert_eq!(parsed, header);
         }
     }
 }
