@@ -1,7 +1,9 @@
+use byteorder::WriteBytesExt;
 use std::{
     io::{Cursor, Read, Seek, SeekFrom, Write},
+    iter::once,
     time::{SystemTime, UNIX_EPOCH},
-    u32,
+    u32, vec,
 };
 
 use binrw::{BinRead, BinWrite};
@@ -11,13 +13,12 @@ use proptest_derive::Arbitrary;
 
 use crate::{
     constants::{MainLanguage, MetadataId, SubLanguage},
-    serialization::{tag_map::TagMapEntry, CNCXRecords, FDSTEntry, SkeletonTagMapEntry},
+    serialization::{tag_map::TagMapEntry, FDSTEntry, SkeletonTagMapEntry, TotalIndexEntry},
 };
 
 use super::{
     exth::Exth, BookType, ChunkTagMapEntry, Codepage, CompressionType, ExthFlags, ExtraDataFlags,
-    FDSTTable, IndexDataRecord, IndexDefinitionRecord, IndxHeader, LanguageCode, MobiHeader,
-    PalmDoc, TagMapDefinition,
+    FDSTTable, LanguageCode, MobiHeader, PalmDoc,
 };
 use crate::serialization::index::types::IndexTagMapEntry;
 
@@ -39,6 +40,8 @@ pub struct Book {
     pub main_language: Option<MainLanguage>,
     pub sub_language: Option<SubLanguage>,
     pub book_parts: Vec<BookPart>,
+    pub resources: Vec<String>, // todo
+    pub compression: CompressionType,
 }
 
 impl TryFrom<PalmDoc> for Book {
@@ -52,7 +55,7 @@ impl TryFrom<PalmDoc> for Book {
         let mobi_header = MobiHeader::read(&mut Cursor::new(first_record)).unwrap();
 
         let mut text = Vec::new();
-        for i in 1..(mobi_header.last_text_record + 1) as usize {
+        for i in 1..(mobi_header.num_of_text_records + 1) as usize {
             let record = &palmdoc
                 .records
                 .get(i)
@@ -82,6 +85,8 @@ impl TryFrom<PalmDoc> for Book {
             main_language: mobi_header.language_code.main,
             sub_language: mobi_header.language_code.sub,
             book_parts: vec![], // todo
+            resources: vec![],  // todo
+            compression: mobi_header.compression_type,
         })
     }
 }
@@ -132,15 +137,26 @@ fn create_text_record(text: &mut Cursor<&[u8]>) -> (Vec<u8>, Vec<u8>) {
 const FLIS: &[u8; 36] = b"FLIS\0\0\0\x08\0\x41\0\0\0\0\0\0\xff\xff\xff\xff\0\x01\0\x03\0\0\0\x03\0\0\0\x01\xff\xff\xff\xff";
 
 fn create_fcis_record(text_length: usize) -> Vec<u8> {
-    let mut fcis: Vec<u8> = vec![
+    let mut fcis = vec![
         0x46, 0x43, 0x49, 0x53, // 'FCIS'
-        0x00, 0x00, 0x00, 0x14, 0x00, 0x00, 0x00, 0x10, 0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00,
-        0x00,
+        0x00, 0x00, 0x00, 0x14, // 0x14
+        0x00, 0x00, 0x00, 0x10, // 0x10
+        0x00, 0x00, 0x00, 0x02, // 0x02
+        0x00, 0x00, 0x00, 0x00, // 0x00
     ];
-    fcis.extend_from_slice(&text_length.to_be_bytes());
+
+    // Pack text_length as big-endian u32
+    fcis.write_u32::<byteorder::BigEndian>(text_length as u32)
+        .unwrap();
+
     fcis.extend_from_slice(&[
-        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x28, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-        0x28, 0x00, 0x00, 0x00, 0x08, 0x00, 0x01, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, // 0x00
+        0x00, 0x00, 0x00, 0x28, // 0x28
+        0x00, 0x00, 0x00, 0x00, // 0x00
+        0x00, 0x00, 0x00, 0x28, // 0x28
+        0x00, 0x00, 0x00, 0x08, // 0x08
+        0x00, 0x01, 0x00, 0x01, // 0x01
+        0x00, 0x00, 0x00, 0x00, // 0x00
     ]);
 
     fcis
@@ -163,7 +179,7 @@ impl TryFrom<&Book> for PalmDoc {
         records.push(vec![]);
 
         // Text records
-        let text = book
+        let text_parts_iter = book
             .book_parts
             .iter()
             .map(|part| {
@@ -172,15 +188,43 @@ impl TryFrom<&Book> for PalmDoc {
                     part.skeleton_head, part.skeleton_tail, part.content
                 )
             })
-            .collect::<String>();
+            .chain(book.resources.iter().map(|r| r.to_string()));
+
+        let mut text = "".to_string();
+        let mut fdst_entries: Vec<FDSTEntry> = vec![];
+
+        let mut pos = 0;
+        for part in text_parts_iter {
+            let part_len = part.len() as u32;
+            fdst_entries.push(FDSTEntry {
+                start: pos,
+                end: pos + part_len,
+            });
+            pos += part_len;
+            text.push_str(&part);
+        }
+
         let mut text_cursor = Cursor::new(text.as_bytes());
         while text_cursor.position() < text_cursor.get_ref().len() as u64 {
             let (record, mut overlap) = create_text_record(&mut text_cursor);
-            // todo: make compression configurable?
-            let mut compressed_record = palmdoc_compression::compress(&record);
-            compressed_record.append(&mut overlap);
-            compressed_record.push(overlap.len() as u8);
-            records.push(compressed_record);
+
+            match book.compression {
+                CompressionType::PalmDoc => {
+                    let mut compressed_record = palmdoc_compression::compress(&record);
+                    compressed_record.append(&mut overlap);
+                    compressed_record.push(overlap.len() as u8);
+                    records.push(compressed_record);
+                }
+                CompressionType::HuffCdic => {
+                    todo!()
+                }
+                CompressionType::None => {
+                    let mut record = record;
+                    record.append(&mut overlap);
+                    record.push(overlap.len() as u8);
+                    records.push(record);
+                }
+            }
         }
 
         let last_text_record = records.len();
@@ -195,39 +239,15 @@ impl TryFrom<&Book> for PalmDoc {
         }
 
         // Metadata records
-        let chunk_index = records.len();
+        let chunk_index_num = records.len();
 
-        let cncx_records = CNCXRecords {
-            strings: vec!["placeholder".into()],
-        }
-        .to_records();
-
-        records.push(
-            IndexDefinitionRecord {
-                len: 192,
-                idxt_offset: u32::MAX,
-                num_of_records: 1,
-                num_of_entries: 0,
-                ordt_offset: 0,
-                ligt_offset: 0,
-                num_of_ordt_ligt_entries: 0,
-                num_of_cncx_records: cncx_records.records.len() as u32,
-                tagx_offset: 0,
-                definition: TagMapDefinition {
-                    tag_definitions: ChunkTagMapEntry::get_tag_definitions(),
-                },
-            }
-            .to_bytes()
-            .unwrap(),
-        );
-
-        // Chunk records
-        let chunk_records = book
+        // Chunk index
+        let chunk_index_entries = book
             .book_parts
             .iter()
             .map(|part| {
                 ChunkTagMapEntry {
-                    insert_position: part.skeleton_head.len() as u32,
+                    insert_position: part.skeleton_head.len() as u32 - 1, // todo?
                     cncx_offset: 0,
                     file_number: 0,
                     sequence_number: 0,
@@ -238,60 +258,20 @@ impl TryFrom<&Book> for PalmDoc {
             })
             .collect::<Vec<TagMapEntry>>();
 
-        let mut serialized_record = Cursor::new(vec![]);
-        let record = IndexDataRecord {
-            header: IndxHeader {
-                len: 36 + 156, // 192
-                block_offset: 0,
-                num_entries: chunk_records.len() as u32,
-            },
-            entries: chunk_records,
-        };
-        let mut writer = Writer::new(&mut serialized_record);
-        record
-            .to_writer(&mut writer, &ChunkTagMapEntry::get_tag_definitions())
-            .unwrap();
-        records.push(serialized_record.into_inner());
+        let chunk_index =
+            TotalIndexEntry::new(ChunkTagMapEntry::get_tag_definitions(), chunk_index_entries);
+        records.extend(chunk_index.into_records());
 
-        for record in cncx_records.records {
-            records.push(record);
-        }
+        let skeleton_index_num = records.len();
 
-        // todo: add chunks to records
-        let skel_index = records.len(); // todo: rename
-
-        let cncx_records = CNCXRecords {
-            strings: vec!["placeholder".into()],
-        }
-        .to_records();
-
-        records.push(
-            IndexDefinitionRecord {
-                len: 192,
-                idxt_offset: u32::MAX,
-                num_of_records: 1,
-                num_of_entries: 1,
-                ordt_offset: 0,
-                ligt_offset: 0,
-                num_of_ordt_ligt_entries: 0,
-                num_of_cncx_records: cncx_records.records.len() as u32,
-                tagx_offset: 0,
-                definition: TagMapDefinition {
-                    tag_definitions: SkeletonTagMapEntry::get_tag_definitions(),
-                },
-            }
-            .to_bytes()
-            .unwrap(),
-        );
-
-        // Skeleton records
-        let skeleton_entries = book
+        // Skeleton index
+        let skeleton_index_entries = book
             .book_parts
             .iter()
             .enumerate()
             .map(|(i, part)| {
                 SkeletonTagMapEntry {
-                    name: format!("SKELETON_{}", i),
+                    name: "SKEL0000000".to_string(),
                     chunk_count: 1,
                     start_offset: 0,
                     length: part.skeleton_head.len() as u32 + part.skeleton_tail.len() as u32,
@@ -300,24 +280,11 @@ impl TryFrom<&Book> for PalmDoc {
             })
             .collect::<Vec<TagMapEntry>>();
 
-        let mut serialized_record = Cursor::new(vec![]);
-        let record = IndexDataRecord {
-            header: IndxHeader {
-                len: 36 + 156, // 192
-                block_offset: 0,
-                num_entries: skeleton_entries.len() as u32,
-            },
-            entries: skeleton_entries,
-        };
-        let mut writer = Writer::new(&mut serialized_record);
-        record
-            .to_writer(&mut writer, &SkeletonTagMapEntry::get_tag_definitions())
-            .unwrap();
-        records.push(serialized_record.into_inner());
-
-        for record in cncx_records.records {
-            records.push(record);
-        }
+        let skeleton_index = TotalIndexEntry::new(
+            SkeletonTagMapEntry::get_tag_definitions(),
+            skeleton_index_entries,
+        );
+        records.extend(skeleton_index.into_records());
 
         let guide_index = u32::MAX; // todo
         let ncx_index = u32::MAX; // todo
@@ -329,36 +296,71 @@ impl TryFrom<&Book> for PalmDoc {
         let fdst_record = records.len();
         records.push(
             FDSTTable {
-                entries: vec![FDSTEntry {
-                    start: 0,
-                    end: text.len() as u32,
-                }],
+                entries: fdst_entries,
             }
             .to_bytes()
             .unwrap(),
         );
 
-        // FCIS
-        let fcis_record = records.len();
-        records.push(create_fcis_record(text.len()));
-
         // FLIS
         let flis_record = records.len();
         records.push(FLIS.to_vec());
+
+        // FCIS
+        let fcis_record = records.len();
+        records.push(create_fcis_record(text.len()));
 
         // EOF
         records.push(b"\xe9\x8e\r\n".to_vec());
 
         let mut exth = Exth::default();
+        exth.metadata_id.insert(
+            MetadataId::Source,
+            vec!["calibre:c64482f4-2952-4f2c-ae28-b109cb70f5bb".into()],
+        );
+        exth.metadata_id.insert(
+            MetadataId::Contributor,
+            vec!["calibre (7.16.0) [http://calibre-ebook.com]".into()],
+        );
+        exth.metadata_id
+            .insert(MetadataId::UpdatedTitle, vec![book.title.clone()]);
+        exth.metadata_id.insert(
+            MetadataId::ASIN,
+            vec!["c64482f4-2952-4f2c-ae28-b109cb70f5bb".into()],
+        );
+        exth.metadata_id
+            .insert(MetadataId::CdeType, vec!["EBOK".into()]);
+        // exth.metadata_id
+        //     .insert(MetadataId::CreatorBuildTag, vec!["0730-890adc2".into()]);
+        exth.metadata_id
+            .insert(MetadataId::ContentLanguageTag, vec!["en".into()]);
+        exth.metadata_id.insert(
+            MetadataId::Published,
+            vec!["2024-08-13T04:05:03.140745+00:00".into()],
+        );
+        exth.metadata_id
+            .insert(MetadataId::OverrideKindleFonts, vec!["true".into()]);
         exth.metadata_id
             .insert(MetadataId::Creator, vec!["kindle".into()]);
+
+        // todo: these aren't serialized correctly?
+        // exth.metadata_value
+        //     .insert(MetadataIdValue::CreatorSoftware, vec![202]);
+        // exth.metadata_value
+        //     .insert(MetadataIdValue::CreatorMajorVersion, vec![2]);
+        // exth.metadata_value
+        //     .insert(MetadataIdValue::CreatorMinorVersion, vec![9]);
+        // exth.metadata_value
+        //     .insert(MetadataIdValue::CreatorBuildNumber, vec![0]);
+        // exth.metadata_value
+        //     .insert(MetadataIdValue::EmbeddedRecordCount, vec![0]);
 
         // todo: consistent terms between _record and _index
         let mobi_header = MobiHeader {
             title: book.title.clone().into(),
-            compression_type: CompressionType::PalmDoc,
+            compression_type: CompressionType::None, //CompressionType::PalmDoc,
             text_length: text.len() as u32,
-            last_text_record: last_text_record as u16,
+            num_of_text_records: 1, // todo
             text_record_size: TEXT_RECORD_SIZE as u16,
             book_type: BookType::Book,
             text_encoding: Codepage::Utf8,
@@ -389,8 +391,8 @@ impl TryFrom<&Book> for PalmDoc {
                 uncrossable_breaks: false,
             },
             ncx_index,
-            chunk_index: chunk_index as u32,
-            skel_index: skel_index as u32,
+            chunk_index: chunk_index_num as u32,
+            skel_index: skeleton_index_num as u32,
             datp_index: u32::MAX,
             guide_index,
             exth: Some(exth),
@@ -398,8 +400,6 @@ impl TryFrom<&Book> for PalmDoc {
         let mut header_serialized = Cursor::new(vec![]);
         mobi_header.write(&mut header_serialized).unwrap();
         records[0] = header_serialized.into_inner();
-
-        println!("records: {:?}", records);
 
         Ok(PalmDoc {
             title: book.title.clone(),

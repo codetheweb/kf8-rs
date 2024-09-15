@@ -2,8 +2,7 @@ use binrw::BinRead;
 use deku::prelude::*;
 use nom::{bytes::complete::take, error::Error, IResult};
 use serialization::{
-    ChunkTagMapEntry, FDSTTable, IndexDataRecord, IndexDefinitionRecord, MobiHeader, PalmDoc,
-    SkeletonTagMapEntry,
+    ChunkTagMapEntry, FDSTTable, IndexDefinitionRecord, MobiHeader, PalmDoc, SkeletonTagMapEntry,
 };
 use std::io::Cursor;
 
@@ -88,7 +87,7 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
 
     let mut raw_ml = Vec::new();
     for (i, section_header) in palmdoc.records.iter().enumerate().skip(1) {
-        if i > book_header.last_text_record as usize {
+        if i > book_header.num_of_text_records as usize {
             break;
         }
 
@@ -115,215 +114,217 @@ pub fn parse_book(input: &[u8]) -> IResult<&[u8], MobiBook> {
 
     let text = *flows.first().unwrap();
 
-    let (_, skeleton_table) = parse_index_data(&palmdoc, book_header.skel_index as usize).unwrap();
+    // let (_, skeleton_table) = parse_index_data(&palmdoc, book_header.skel_index as usize).unwrap();
 
-    let (_, fragment_table) = parse_index_data(&palmdoc, book_header.chunk_index as usize).unwrap();
+    // let (_, fragment_table) = parse_index_data(&palmdoc, book_header.chunk_index as usize).unwrap();
 
-    let fragment_table = fragment_table.parse_as::<ChunkTagMapEntry>().unwrap();
+    // let fragment_table = fragment_table.parse_as::<ChunkTagMapEntry>().unwrap();
 
-    let mut parts = vec![];
+    // let mut parts = vec![];
 
-    let mut fragment_i = 0;
-    for (i, skeleton_entry) in skeleton_table
-        .parse_as::<SkeletonTagMapEntry>()
-        .unwrap()
-        .iter()
-        .enumerate()
-    {
-        let mut base_ptr = (skeleton_entry.start_offset + skeleton_entry.length) as usize;
+    // let mut fragment_i = 0;
+    // for (i, skeleton_entry) in skeleton_table
+    //     .parse_as::<SkeletonTagMapEntry>()
+    //     .unwrap()
+    //     .iter()
+    //     .enumerate()
+    // {
+    //     let mut base_ptr = (skeleton_entry.start_offset + skeleton_entry.length) as usize;
 
-        let mut fragments: Vec<MobiBookFragment> = vec![];
+    //     let mut fragments: Vec<MobiBookFragment> = vec![];
 
-        let first_fragment = fragment_table.get(fragment_i).unwrap();
-        let split_skeleton_at = first_fragment.insert_position as usize;
+    //     let first_fragment = fragment_table.get(fragment_i).unwrap();
+    //     let split_skeleton_at = first_fragment.insert_position as usize;
 
-        // todo: zip?
-        let mut filename: String = "".to_string();
-        for i in 0..skeleton_entry.chunk_count {
-            let fragment_entry = fragment_table.get(fragment_i).unwrap();
+    //     // todo: zip?
+    //     let mut filename: String = "".to_string();
+    //     for i in 0..skeleton_entry.chunk_count {
+    //         let fragment_entry = fragment_table.get(fragment_i).unwrap();
 
-            if i == 0 {
-                filename = format!("part{}.xhtml", fragment_entry.file_number);
-            }
+    //         if i == 0 {
+    //             filename = format!("part{}.xhtml", fragment_entry.file_number);
+    //         }
 
-            let fragment_text = &text[base_ptr..base_ptr + fragment_entry.length as usize];
+    //         let fragment_text = &text[base_ptr..base_ptr + fragment_entry.length as usize];
 
-            fragments.push(MobiBookFragment {
-                index: fragment_i,
-                content: fragment_text.to_vec(),
-            });
+    //         fragments.push(MobiBookFragment {
+    //             index: fragment_i,
+    //             content: fragment_text.to_vec(),
+    //         });
 
-            base_ptr += fragment_entry.length as usize;
-            fragment_i += 1;
-        }
+    //         base_ptr += fragment_entry.length as usize;
+    //         fragment_i += 1;
+    //     }
 
-        let skeleton_head = &text[skeleton_entry.start_offset as usize..split_skeleton_at];
-        let skeleton_tail = &text
-            [split_skeleton_at..(skeleton_entry.start_offset + skeleton_entry.length) as usize];
+    //     let skeleton_head = &text[skeleton_entry.start_offset as usize..split_skeleton_at];
+    //     let skeleton_tail = &text
+    //         [split_skeleton_at..(skeleton_entry.start_offset + skeleton_entry.length) as usize];
 
-        parts.push(MobiBookPart {
-            filename,
-            skeleton_head: skeleton_head.to_vec(),
-            fragments,
-            skeleton_tail: skeleton_tail.to_vec(),
-            start_offset: skeleton_entry.start_offset as usize,
-            end_offset: base_ptr,
-        });
-    }
+    //     parts.push(MobiBookPart {
+    //         filename,
+    //         skeleton_head: skeleton_head.to_vec(),
+    //         fragments,
+    //         skeleton_tail: skeleton_tail.to_vec(),
+    //         start_offset: skeleton_entry.start_offset as usize,
+    //         end_offset: base_ptr,
+    //     });
+    // }
 
-    // Resources
-    let mut resources: Vec<Resource> = vec![];
+    // // Resources
+    // let mut resources: Vec<Resource> = vec![];
 
-    // todo: handle SVGs/images, CDATA?
-    let stylesheets = flows.iter().skip(1);
+    // // todo: handle SVGs/images, CDATA?
+    // let stylesheets = flows.iter().skip(1);
 
-    let mut info = infer::Infer::new();
-    info.add("text/css", "css", |_| true);
+    // let mut info = infer::Infer::new();
+    // info.add("text/css", "css", |_| true);
 
-    for (i, stylesheet) in stylesheets.enumerate() {
-        resources.push(Resource {
-            kind: ResourceKind::Stylesheet,
-            data: stylesheet.to_vec(),
-            file_type: info.get(stylesheet).unwrap(),
-            flow_index: Some(i + 1),
-        });
-    }
+    // for (i, stylesheet) in stylesheets.enumerate() {
+    //     resources.push(Resource {
+    //         kind: ResourceKind::Stylesheet,
+    //         data: stylesheet.to_vec(),
+    //         file_type: info.get(stylesheet).unwrap(),
+    //         flow_index: Some(i + 1),
+    //     });
+    // }
 
-    let cover_offset = book_header.first_resource_record as usize
-        + *book_header
-            .exth
-            .as_ref()
-            .unwrap()
-            .metadata_value
-            .get(&MetadataIdValue::CoverOffset)
-            .unwrap()
-            .first()
-            .unwrap() as usize;
+    // let cover_offset = book_header.first_resource_record as usize
+    //     + *book_header
+    //         .exth
+    //         .as_ref()
+    //         .unwrap()
+    //         .metadata_value
+    //         .get(&MetadataIdValue::CoverOffset)
+    //         .unwrap()
+    //         .first()
+    //         .unwrap() as usize;
 
-    let thumbnail_offset = book_header.first_resource_record as usize
-        + *book_header
-            .exth
-            .as_ref()
-            .unwrap()
-            .metadata_value
-            .get(&MetadataIdValue::ThumbOffset)
-            .unwrap()
-            .first()
-            .unwrap() as usize;
+    // let thumbnail_offset = book_header.first_resource_record as usize
+    //     + *book_header
+    //         .exth
+    //         .as_ref()
+    //         .unwrap()
+    //         .metadata_value
+    //         .get(&MetadataIdValue::ThumbOffset)
+    //         .unwrap()
+    //         .first()
+    //         .unwrap() as usize;
 
-    for section_i in book_header.first_resource_record as usize..palmdoc.records.len() {
-        let data = palmdoc.records[section_i].as_slice();
-        let (input, resource_type) = take::<usize, &[u8], Error<&[u8]>>(4usize)(data).unwrap();
+    // for section_i in book_header.first_resource_record as usize..palmdoc.records.len() {
+    //     let data = palmdoc.records[section_i].as_slice();
+    //     let (input, resource_type) = take::<usize, &[u8], Error<&[u8]>>(4usize)(data).unwrap();
 
-        match resource_type {
-            b"FLIS" | b"FCIS" | b"FDST" | b"DATP" => {
-                // todo?
-            }
-            b"SRCS" => {
-                // todo
-            }
-            b"PAGE" => {
-                // todo
-            }
-            b"CMET" => {
-                // todo
-            }
-            b"FONT" => {
-                // todo
-            }
-            b"CRES" => {
-                // todo
-            }
-            b"CONT" => {
-                // todo
-            }
-            b"kind" => {
-                // todo
-            }
-            [0xa0, 0xa0, 0xa0, 0xa0] => {
-                // todo
-                println!("byte pattern, empty image?")
-            }
-            b"RESC" => {
-                // todo
-            }
-            // EOF
-            [0xe9, 0x8e, 0x0d, 0x0a] => {
-                // todo
-            }
-            b"BOUN" => {
-                // todo
-            }
-            _ => {
-                // Should be an image
-                let file_type = infer::get(data);
+    //     match resource_type {
+    //         b"FLIS" | b"FCIS" | b"FDST" | b"DATP" => {
+    //             // todo?
+    //         }
+    //         b"SRCS" => {
+    //             // todo
+    //         }
+    //         b"PAGE" => {
+    //             // todo
+    //         }
+    //         b"CMET" => {
+    //             // todo
+    //         }
+    //         b"FONT" => {
+    //             // todo
+    //         }
+    //         b"CRES" => {
+    //             // todo
+    //         }
+    //         b"CONT" => {
+    //             // todo
+    //         }
+    //         b"kind" => {
+    //             // todo
+    //         }
+    //         [0xa0, 0xa0, 0xa0, 0xa0] => {
+    //             // todo
+    //             println!("byte pattern, empty image?")
+    //         }
+    //         b"RESC" => {
+    //             // todo
+    //         }
+    //         // EOF
+    //         [0xe9, 0x8e, 0x0d, 0x0a] => {
+    //             // todo
+    //         }
+    //         b"BOUN" => {
+    //             // todo
+    //         }
+    //         _ => {
+    //             // Should be an image
+    //             let file_type = infer::get(data);
 
-                if section_i == cover_offset {
-                    resources.push(Resource {
-                        kind: ResourceKind::Image(ImageResourceKind::Cover),
-                        data: data.to_vec(),
-                        file_type: file_type.unwrap(),
-                        flow_index: None,
-                    })
-                } else if section_i == thumbnail_offset {
-                    resources.push(Resource {
-                        kind: ResourceKind::Image(ImageResourceKind::Thumbnail),
-                        data: data.to_vec(),
-                        file_type: file_type.unwrap(),
-                        flow_index: None,
-                    })
-                } else {
-                    resources.push(Resource {
-                        kind: ResourceKind::Image(ImageResourceKind::Other),
-                        data: data.to_vec(),
-                        file_type: file_type.unwrap(),
-                        flow_index: None,
-                    })
-                }
-            }
-        }
-    }
+    //             if section_i == cover_offset {
+    //                 resources.push(Resource {
+    //                     kind: ResourceKind::Image(ImageResourceKind::Cover),
+    //                     data: data.to_vec(),
+    //                     file_type: file_type.unwrap(),
+    //                     flow_index: None,
+    //                 })
+    //             } else if section_i == thumbnail_offset {
+    //                 resources.push(Resource {
+    //                     kind: ResourceKind::Image(ImageResourceKind::Thumbnail),
+    //                     data: data.to_vec(),
+    //                     file_type: file_type.unwrap(),
+    //                     flow_index: None,
+    //                 })
+    //             } else {
+    //                 resources.push(Resource {
+    //                     kind: ResourceKind::Image(ImageResourceKind::Other),
+    //                     data: data.to_vec(),
+    //                     file_type: file_type.unwrap(),
+    //                     flow_index: None,
+    //                 })
+    //             }
+    //         }
+    //     }
+    // }
 
-    Ok((
-        input,
-        MobiBook {
-            palmdoc: palmdoc.clone(),
-            book_header,
-            fragment_table,
-            // todo: this should not be lossy
-            content: String::from_utf8_lossy(&raw_ml).to_string(),
-            parts,
-            resources,
-        },
-    ))
-}
-
-fn parse_index_data<'a>(
-    palmdoc: &'a PalmDoc,
-    section_i: usize,
-) -> IResult<&'a [u8], IndexDataRecord> {
-    // Parse INDX header
-    let indx_section_data = palmdoc.records[section_i].as_slice();
-    let (_, index_definition_record) =
-        IndexDefinitionRecord::from_bytes((indx_section_data, 0)).unwrap();
-
-    for i in (section_i + 1)..(section_i + 1 + index_definition_record.num_of_records as usize) {
-        let data = palmdoc.records[i].as_slice();
-
-        let mut cursor = Cursor::new(&data);
-        let mut reader = Reader::new(&mut cursor);
-        let index_record = IndexDataRecord::from_reader_with_ctx(
-            &mut reader,
-            &index_definition_record.definition.tag_definitions,
-        )
-        .unwrap();
-
-        // todo: handle multiple records
-        return Ok((&[], index_record));
-    }
+    // Ok((
+    //     input,
+    //     MobiBook {
+    //         palmdoc: palmdoc.clone(),
+    //         book_header,
+    //         fragment_table,
+    //         // todo: this should not be lossy
+    //         content: String::from_utf8_lossy(&raw_ml).to_string(),
+    //         parts,
+    //         resources,
+    //     },
+    // ))
 
     todo!()
 }
+
+// fn parse_index_data<'a>(
+//     palmdoc: &'a PalmDoc,
+//     section_i: usize,
+// ) -> IResult<&'a [u8], IndexDataRecord> {
+//     // Parse INDX header
+//     let indx_section_data = palmdoc.records[section_i].as_slice();
+//     let (_, index_definition_record) =
+//         IndexDefinitionRecord::from_bytes((indx_section_data, 0)).unwrap();
+
+//     for i in (section_i + 1)..(section_i + 1 + index_definition_record.num_of_records as usize) {
+//         let data = palmdoc.records[i].as_slice();
+
+//         let mut cursor = Cursor::new(&data);
+//         let mut reader = Reader::new(&mut cursor);
+//         let index_record = IndexDataRecord::from_reader_with_ctx(
+//             &mut reader,
+//             &index_definition_record.definition.tag_definitions,
+//         )
+//         .unwrap();
+
+//         // todo: handle multiple records
+//         return Ok((&[], index_record));
+//     }
+
+//     todo!()
+// }
 
 #[cfg(test)]
 mod tests {

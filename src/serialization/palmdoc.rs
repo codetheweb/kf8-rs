@@ -79,8 +79,7 @@ fn write_record_offsets<W: Write>(
     for (i, record) in records.iter().enumerate() {
         PalmDocRecordOffset {
             offset: offset as u32,
-            // todo: correct?
-            unique_id: i as u32,
+            unique_id: i as u32 * 2,
         }
         .to_writer(writer, deku::ctx::Endian::Big)?;
         offset += record.len();

@@ -9,27 +9,30 @@ use proptest_derive::Arbitrary;
 #[derive(Debug, PartialEq)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct IndexDefinitionRecord {
-    pub len: u32, // todo: populate with length
-    #[deku(temp, temp_value = "[0; 8]")]
-    _unused0: [u8; 8],
+    #[deku(temp, temp_value = "192")]
+    len: u32,
+    #[deku(temp, temp_value = "1")]
+    _unused_index_type: u32,
+    #[deku(temp, temp_value = "[0; 4]")]
+    _unused0: [u8; 4],
     #[deku(temp, temp_value = "2")]
     _unused_header_type: u32,
-    pub idxt_offset: u32,
+    pub offset_to_offsets: u32,
     pub num_of_records: u32,
     #[deku(temp, temp_value = "65001")]
     _unused_encoding: u32,
     #[deku(temp, temp_value = "u32::MAX")]
-    _unused1: u32,
-    pub num_of_entries: u32,
+    _unused_index_language: u32,
+    pub total_index_count: u32,
     pub ordt_offset: u32,
     pub ligt_offset: u32,
     pub num_of_ordt_ligt_entries: u32,
     pub num_of_cncx_records: u32,
-    #[deku(temp, temp_value = "[0; 124]")]
-    _unused2: [u8; 124],
-    pub tagx_offset: u32,
-    #[deku(temp, temp_value = "[0; 8]")]
-    _unused3: [u8; 8],
+    // #[deku(temp, temp_value = "[0; 124]")]
+    // _unused2: [u8; 124],
+    // pub tagx_offset: u32,
+    // #[deku(temp, temp_value = "[0; 8]")]
+    // _unused3: [u8; 8],
     pub definition: TagMapDefinition,
 }
 

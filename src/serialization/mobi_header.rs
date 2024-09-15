@@ -207,6 +207,7 @@ pub enum Codepage {
 #[binrw]
 #[brw(big, repr(u16))]
 pub enum CompressionType {
+    // todo: should None be an option?
     None = 0x0001,
     PalmDoc = 0x0002,
     HuffCdic = 0x4448,
@@ -259,7 +260,7 @@ pub struct MobiHeader {
     #[bw(calc = [0x00; 2])]
     _unused0: [u8; 2],
     pub text_length: u32,
-    pub last_text_record: u16,
+    pub num_of_text_records: u16,
     pub text_record_size: u16,
     #[br(temp)]
     #[bw(calc = 0)]
@@ -289,7 +290,7 @@ pub struct MobiHeader {
     pub first_non_text_record: u32,
     #[br(temp)]
     #[bw(calc = 0)]
-    title_offset: u32, // todo: derive with deku?
+    title_offset: u32, // 0x10e
     #[br(temp)]
     #[bw(calc = title.len() as u32)]
     pub title_length: u32,
@@ -385,6 +386,9 @@ pub struct MobiHeader {
     #[cfg_attr(test, proptest(strategy = "any_null_string()"))]
     #[bw(write_with = write_string_and_offset)]
     pub title: NullString,
+    #[br(temp, count = 8192)] // todo?
+    #[bw(calc = vec![0x00; 8192])]
+    padding: Vec<u8>,
 }
 
 impl Default for MobiHeader {
@@ -392,7 +396,7 @@ impl Default for MobiHeader {
         MobiHeader {
             compression_type: CompressionType::None,
             text_length: 0,
-            last_text_record: 0,
+            num_of_text_records: 0,
             text_record_size: 0,
             book_type: BookType::Book,
             text_encoding: Codepage::Cp1252,

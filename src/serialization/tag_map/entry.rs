@@ -6,7 +6,7 @@ use nom::{bytes::complete::take, error::ErrorKind, number::complete::be_u8, IRes
 
 use super::{read_entry::parse_tag_map, write_entry::serialize_tag_map, TagDefinition};
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct TagMapEntry {
     pub text: String,
     pub tag_map: HashMap<u8, Vec<u32>>,
@@ -54,12 +54,13 @@ impl<'a> DekuReader<'a, (usize, &Vec<TagDefinition>)> for TagMapEntry {
     }
 }
 
-impl DekuWriter<&Vec<TagDefinition>> for TagMapEntry {
+impl DekuWriter<(deku::ctx::Endian, &Vec<TagDefinition>)> for TagMapEntry {
     fn to_writer<W: Write>(
         &self,
         writer: &mut Writer<W>,
-        definitions: &Vec<TagDefinition>,
+        ctx: (deku::ctx::Endian, &Vec<TagDefinition>),
     ) -> Result<(), DekuError> {
+        let (_, definitions) = ctx;
         writer.write_bytes(&[self.text.len() as u8])?;
         writer.write_bytes(self.text.as_bytes())?;
 
