@@ -271,7 +271,7 @@ impl TryFrom<&Book> for PalmDoc {
             .enumerate()
             .map(|(i, part)| {
                 SkeletonTagMapEntry {
-                    name: "SKEL0000000".to_string(),
+                    name: "SKEL0000000000".to_string(),
                     chunk_count: 1,
                     start_offset: 0,
                     length: part.skeleton_head.len() as u32 + part.skeleton_tail.len() as u32,

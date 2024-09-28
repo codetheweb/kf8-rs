@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 use nom::{
     bytes::complete::take,
@@ -45,16 +45,16 @@ pub(super) fn read_exth(
 ) -> IResult<
     &[u8],
     (
-        HashMap<MetadataId, Vec<String>>,
-        HashMap<MetadataIdValue, Vec<u32>>,
+        BTreeMap<MetadataId, Vec<String>>,
+        BTreeMap<MetadataIdValue, Vec<u32>>,
     ),
 > {
     let (input, num_items) = be_u32(input)?;
 
     let (input, items) = count(read_exth_key_value, num_items as usize)(input)?;
 
-    let mut standard_metadata: HashMap<MetadataId, Vec<String>> = HashMap::new();
-    let mut kf8_metadata: HashMap<MetadataIdValue, Vec<u32>> = HashMap::new();
+    let mut standard_metadata: BTreeMap<MetadataId, Vec<String>> = BTreeMap::new();
+    let mut kf8_metadata: BTreeMap<MetadataIdValue, Vec<u32>> = BTreeMap::new();
     for item in items {
         match item {
             ExthKeyValue::ID(id, content) => standard_metadata.entry(id).or_default().push(content),

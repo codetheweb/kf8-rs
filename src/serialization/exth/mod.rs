@@ -1,6 +1,6 @@
 use crate::constants::{MetadataId, MetadataIdValue};
 use std::{
-    collections::HashMap,
+    collections::BTreeMap,
     io::{ErrorKind, Read, Write},
 };
 
@@ -14,7 +14,7 @@ use proptest_derive::Arbitrary;
 mod read;
 mod write;
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(Debug, PartialEq, Clone, Default)]
 #[cfg_attr(test, derive(Arbitrary))]
 pub struct Exth {
     // Manually specifying strategies so that each Vec in the hashmap has at least one element.
@@ -22,26 +22,17 @@ pub struct Exth {
     #[cfg_attr(
         test,
         proptest(
-            strategy = "proptest::collection::hash_map(any::<MetadataId>(), proptest::collection::vec(\".*\", 1..32), 1..64)"
+            strategy = "proptest::collection::btree_map(any::<MetadataId>(), proptest::collection::vec(\".*\", 1..32), 1..64)"
         )
     )]
-    pub metadata_id: HashMap<MetadataId, Vec<String>>,
+    pub metadata_id: BTreeMap<MetadataId, Vec<String>>,
     #[cfg_attr(
         test,
         proptest(
-            strategy = "proptest::collection::hash_map(any::<MetadataIdValue>(), proptest::collection::vec(0..u32::MAX, 1..32), 1..64)"
+            strategy = "proptest::collection::btree_map(any::<MetadataIdValue>(), proptest::collection::vec(0..u32::MAX, 1..32), 1..64)"
         )
     )]
-    pub metadata_value: HashMap<MetadataIdValue, Vec<u32>>,
-}
-
-impl Default for Exth {
-    fn default() -> Self {
-        Exth {
-            metadata_id: HashMap::new(),
-            metadata_value: HashMap::new(),
-        }
-    }
+    pub metadata_value: BTreeMap<MetadataIdValue, Vec<u32>>,
 }
 
 impl<'a, Ctx> DekuReader<'a, Ctx> for Exth {
@@ -79,7 +70,7 @@ impl<Ctx> DekuWriter<Ctx> for Exth {
 
         writer.write_bytes(b"EXTH")?;
 
-        let len = serialized.len() as u32;
+        let len = serialized.len() as u32 + 16;
         len.to_writer(writer, deku::ctx::Endian::Big)?;
 
         writer.write_bytes(&serialized)?;
