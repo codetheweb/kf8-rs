@@ -38,8 +38,8 @@ const CSS_CONTENT: &str = r#"
 fn main() {
     let mut rng = rand::thread_rng();
 
-    // let uid: u32 = rng.gen();
-    let uid: u32 = 0x9CDB8CF6;
+    let uid: u32 = rng.gen();
+    // let uid: u32 = 0x9CDB8CF6;
 
     let skeleton_head = r#"<?xml version="1.0" encoding="UTF-8"?>
 <html xmlns="http://www.w3.org/1999/xhtml" lang="en-US">
@@ -53,9 +53,19 @@ fn main() {
 </html>
 "#;
     let slice = r#"<section class="epub-type-titlepage" id="titlepage" aid="1">
-<h1 class="calibre1" aid="2">War and Peace</h1>
-<p class="calibre2" aid="3">By <b class="calibre3" aid="4">Leo</b>.</p>
-<p class="calibre2" aid="5">Trans by <b class="calibre3" aid="6">Louise Maude</b> and <b class="calibre3" aid="7">Aylmer Maude</b>.</p>
+<h1 class="calibre1" aid="2">hello world</h1>
+<p class="calibre2" aid="3">This e-book was created by Ignite, a from-scratch KF8 (.azw3) convertor for Kindle written in Rust.</p>
+<p>To my knowledge, Calibre is the only open-source KF8 convertor.</p>
+<p>Ignite is the second and aims to be:</p>
+<ul>
+<li>correct</li>
+<li>easily embeddable</li>
+<li>performant</li>
+</ul>
+
+<p>There's a lot of work left, but I'm hoping to convert some real books soon. :)</p>
+
+<p>Check out <b>github.com/codetheweb/ignite</b> if you want to follow progress!</p>
 </section>
 "#;
 

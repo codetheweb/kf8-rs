@@ -5,9 +5,12 @@ use deku::prelude::*;
 #[cfg(test)]
 use proptest_derive::Arbitrary;
 
-use crate::serialization::{
-    tag_map::{TagDefinition, TagMapEntry},
-    TagMapDefinition,
+use crate::{
+    serialization::{
+        tag_map::{TagDefinition, TagMapEntry},
+        TagMapDefinition,
+    },
+    utils::deku::serialize_variable_width_value,
 };
 
 use super::types::IndexTagMapEntry;
@@ -152,7 +155,7 @@ impl TotalIndexEntry {
             ordt_offset: 0,
             ligt_offset: 0,
             num_of_ordt_ligt_entries: 0,
-            num_of_cncx_records: 0,
+            num_of_cncx_records: 1,
             tagx: TagMapDefinition {
                 tag_definitions: self.tag_definitions.clone(),
             },
@@ -183,18 +186,51 @@ impl TotalIndexEntry {
         records.push(header_bytes);
 
         // Create index record
-        let index_record = IndexRecord {
+        let mut index_record = IndexRecord {
             len: 192,
-            idxt_block_offset: 0,
-            num_of_idxt_entries: 0,
-            tag_definitions: self.tag_definitions,
-            tag_map_entries: self.entries,
+            idxt_block_offset: 0,   // updated later
+            num_of_idxt_entries: 1, // todo
+            tag_definitions: self.tag_definitions.clone(),
+            tag_map_entries: self.entries.clone(),
         };
         let index_record_bytes = index_record.to_bytes().unwrap();
-        let index_record_bytes = [index_record_bytes, "IDXT".as_bytes().to_vec()].concat();
+        index_record.idxt_block_offset = index_record_bytes.len() as u32;
+        let index_record_bytes = index_record.to_bytes().unwrap();
+
+        let idxt_block = IdxtBlock {
+            key_offsets: once(0)
+                .chain(self.entries.iter().map(|x| {
+                    let mut cursor = std::io::Cursor::new(Vec::new());
+                    let mut writer = Writer::new(&mut cursor);
+                    x.to_writer(&mut writer, (deku::ctx::Endian::Big, &self.tag_definitions))
+                        .unwrap();
+
+                    cursor.into_inner().len() as u16
+                }))
+                .map(|x| 192 as u16 + x)
+                // skip last
+                .enumerate()
+                .filter_map(|(i, x)| {
+                    if i == self.entries.len() {
+                        None
+                    } else {
+                        Some(x)
+                    }
+                })
+                .collect(),
+        };
+
+        let index_record_bytes = [index_record_bytes, idxt_block.to_bytes().unwrap()].concat();
         records.push(index_record_bytes);
 
         // todo: cncx records
+        let cncx_text = "P-//*[@aid='0']";
+        let cncx_record = [
+            serialize_variable_width_value(cncx_text.len() as u32, deku::ctx::Endian::Big),
+            cncx_text.as_bytes().to_vec(),
+        ]
+        .concat();
+        records.push(cncx_record);
 
         records
     }
